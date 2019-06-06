@@ -21,7 +21,7 @@ SUPPORT_LIST=`ls configs/*[r,p][x,v,k][0-9][0-9]*_defconfig`
 #
 # Format:           target board               label         loader      trust
 RKCHIP_INI_DESC=("CONFIG_TARGET_GVA_RK3229       NA          RK322XAT     NA"
-                 "CONFIG_COPROCESSOR_RK1808  RK3399PRO-NPU  RK3399PRONPU  RK3399PRONPU"
+                 "CONFIG_COPROCESSOR_RK1808  RKNPU-LION      RKNPULION    RKNPULION"
 # to be add...
                 )
 
@@ -78,7 +78,7 @@ help()
 	echo "	./make.sh [board|subcmd] [O=<dir>]"
 	echo
 	echo "	 - board: board name of defconfig"
-	echo "	 - subcmd: loader|loader-all|trust|uboot|elf|map|sym|<addr>|"
+	echo "	 - subcmd: loader|loader-all|trust|trust-all|uboot|elf|map|sym|<addr>|"
 	echo "	 - O=<dir>: assigned output directory"
 	echo
 	echo "Example:"
@@ -92,10 +92,11 @@ help()
 	echo "	After build, Images of uboot, loader and trust are all generated."
 	echo
 	echo "2. Pack helper:"
-	echo "	./make.sh trust                    --- pack trust.img"
 	echo "	./make.sh uboot                    --- pack uboot.img"
+	echo "	./make.sh trust                    --- pack trust.img"
+	echo "	./make.sh trust-all                --- pack trust img (all supported)"
 	echo "	./make.sh loader                   --- pack loader bin"
-	echo "	./make.sh loader-all	           --- pack loader bin (all supported loaders)"
+	echo "	./make.sh loader-all	           --- pack loader bin (all supported)"
 	echo
 	echo "3. Debug helper:"
 	echo "	./make.sh elf                      --- dump elf file with -D(default)"
@@ -119,7 +120,7 @@ prepare()
 	else
 		case $BOARD in
 			# Parse from exit .config
-			''|elf*|loader*|debug*|trust|uboot|map|sym)
+			''|elf*|loader*|debug*|trust*|uboot|map|sym)
 			count=`find -name .config | wc -l`
 			dir=`find -name .config`
 			# Good, find only one .config
@@ -159,7 +160,7 @@ prepare()
 		;;
 
 		#Subcmd
-		''|elf*|loader*|debug*|trust|uboot|map|sym)
+		''|elf*|loader*|debug*|trust*|uboot|map|sym)
 		;;
 
 		*)
@@ -261,7 +262,7 @@ sub_commands()
 		;;
 
 		trust)
-		pack_trust_image
+		pack_trust_image ${opt}
 		exit 0
 		;;
 
@@ -271,7 +272,7 @@ sub_commands()
 		;;
 
 		uboot)
-		pack_uboot_image
+		pack_uboot_image ${opt}
 		exit 0
 		;;
 
@@ -504,8 +505,24 @@ debug_command()
 
 pack_uboot_image()
 {
-	local UBOOT_LOAD_ADDR
+	local UBOOT_LOAD_ADDR UBOOT_MAX_KB UBOOT_KB HEAD_KB=2
 
+	# Check file size
+	UBOOT_KB=`ls -l u-boot.bin | awk '{print $5}'`
+	if [ "$PLATFORM_UBOOT_IMG_SIZE" = "" ]; then
+		UBOOT_MAX_KB=1046528
+	else
+		UBOOT_MAX_KB=`echo $PLATFORM_UBOOT_IMG_SIZE | awk '{print strtonum($2)}'`
+		UBOOT_MAX_KB=$(((UBOOT_MAX_KB-HEAD_KB)*1024))
+	fi
+
+	if [ $UBOOT_KB -gt $UBOOT_MAX_KB ]; then
+		echo
+		echo "ERROR: pack uboot failed! u-boot.bin actual: $UBOOT_KB bytes, max limit: $UBOOT_MAX_KB bytes"
+		exit 1
+	fi
+
+	# Pack image
 	UBOOT_LOAD_ADDR=`sed -n "/CONFIG_SYS_TEXT_BASE=/s/CONFIG_SYS_TEXT_BASE=//p" ${OUTDIR}/include/autoconf.mk|tr -d '\r'`
 	if [ ! $UBOOT_LOAD_ADDR ]; then
 		UBOOT_LOAD_ADDR=`sed -n "/CONFIG_SYS_TEXT_BASE=/s/CONFIG_SYS_TEXT_BASE=//p" ${OUTDIR}/.config|tr -d '\r'`
@@ -527,17 +544,18 @@ pack_uboot_image()
 
 pack_loader_image()
 {
-	local mode=$1 files ini
+	local mode=$1 files ini=${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini
 
-	if [ ! -f ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini ]; then
-		echo "pack loader failed! Can't find: ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini"
+	if [ ! -f $ini ]; then
+		echo "pack loader failed! Can't find: $ini"
 		return
 	fi
 
+	ls *_loader_*.bin >/dev/null && rm *_loader_*.bin
 	cd ${RKBIN}
 
 	if [ "${mode}" = 'all' ]; then
-		files=`ls ${RKBIN}/RKBOOT/${RKCHIP_LOADER}*MINIALL*.ini`
+		files=`ls ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL*.ini`
 		for ini in $files
 		do
 			if [ -f "$ini" ]; then
@@ -546,62 +564,107 @@ pack_loader_image()
 			fi
 		done
 	else
-		${RKTOOLS}/boot_merger ${BIN_PATH_FIXUP} ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini
-		echo "pack loader okay! Input: ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini"
+		${RKTOOLS}/boot_merger ${BIN_PATH_FIXUP} $ini
+		echo "pack loader okay! Input: $ini"
 	fi
 
 	cd - && mv ${RKBIN}/*_loader_*.bin ./
 }
 
+__pack_32bit_trust_image()
+{
+	local ini=$1 TOS TOS_TA DARM_BASE TEE_LOAD_ADDR TEE_OUTPUT TEE_OFFSET
+
+	if [ ! -f ${ini} ]; then
+		echo "pack trust failed! Can't find: ${ini}"
+		return
+	fi
+
+	# Parse orignal path
+	TOS=`sed -n "/TOS=/s/TOS=//p" ${ini} |tr -d '\r'`
+	TOS_TA=`sed -n "/TOSTA=/s/TOSTA=//p" ${ini} |tr -d '\r'`
+
+	# Parse address and output name
+	TEE_OUTPUT=`sed -n "/OUTPUT=/s/OUTPUT=//p" ${ini} |tr -d '\r'`
+	if [ "$TEE_OUTPUT" = "" ]; then
+		TEE_OUTPUT="./trust.img"
+	fi
+	TEE_OFFSET=`sed -n "/ADDR=/s/ADDR=//p" ${ini} |tr -d '\r'`
+	if [ "$TEE_OFFSET" = "" ]; then
+		TEE_OFFSET=0x8400000
+	fi
+
+	# OP-TEE is 132M(0x8400000) offset from DRAM base.
+	DARM_BASE=`sed -n "/CONFIG_SYS_SDRAM_BASE=/s/CONFIG_SYS_SDRAM_BASE=//p" ${OUTDIR}/include/autoconf.mk|tr -d '\r'`
+	TEE_LOAD_ADDR=$((DARM_BASE+TEE_OFFSET))
+
+	# Convert Dec to Hex
+	TEE_LOAD_ADDR=$(echo "obase=16;${TEE_LOAD_ADDR}"|bc)
+
+	# Replace "./tools/rk_tools/" with "./" to compatible legacy ini content of rkdevelop branch
+	TOS=$(echo ${TOS} | sed "s/tools\/rk_tools\//\.\//g")
+	TOS_TA=$(echo ${TOS_TA} | sed "s/tools\/rk_tools\//\.\//g")
+
+	if [ $TOS_TA ]; then
+		${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS_TA} ${TEE_OUTPUT} ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
+	elif [ $TOS ]; then
+		${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS}    ${TEE_OUTPUT} ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
+	else
+		echo "Can't find any tee bin"
+		exit 1
+	fi
+
+	echo "pack trust okay! Input: ${ini}"
+	echo
+}
+
+__pack_64bit_trust_image()
+{
+	local ini=$1
+
+	if [ ! -f ${ini} ]; then
+		echo "pack trust failed! Can't find: ${ini}"
+		return
+	fi
+
+	cd ${RKBIN}
+	${RKTOOLS}/trust_merger ${PLATFORM_SHA} ${PLATFORM_RSA} ${PLATFORM_TRUST_IMG_SIZE} ${BIN_PATH_FIXUP} \
+				${PACK_IGNORE_BL32} ${ini}
+
+	cd - && mv ${RKBIN}/trust*.img ./
+	echo "pack trust okay! Input: ${ini}"
+	echo
+}
+
 pack_trust_image()
 {
-	local TOS TOS_TA DARM_BASE TEE_LOAD_ADDR TEE_OFFSET=0x8400000
+	local mode=$1 files ini
 
+	ls trust*.img >/dev/null && rm trust*.img
 	# ARM64 uses trust_merger
 	if grep -Eq ''^CONFIG_ARM64=y'|'^CONFIG_ARM64_BOOT_AARCH32=y'' ${OUTDIR}/.config ; then
-		if [ ! -f ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini ]; then
-			echo "pack trust failed! Can't find: ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini"
-			return
+		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini
+		if [ "${mode}" = 'all' ]; then
+			files=`ls ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST*.ini`
+			for ini in $files
+			do
+				__pack_64bit_trust_image ${ini}
+			done
+		else
+			__pack_64bit_trust_image ${ini}
 		fi
-
-		cd ${RKBIN}
-		${RKTOOLS}/trust_merger ${PLATFORM_SHA} ${PLATFORM_RSA} ${PLATFORM_TRUST_IMG_SIZE} ${BIN_PATH_FIXUP} \
-					${PACK_IGNORE_BL32} ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini
-
-		cd - && mv ${RKBIN}/trust.img ./trust.img
-		echo "pack trust okay! Input: ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini"
 	# ARM uses loaderimage
 	else
-		if [ ! -f ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini ]; then
-			echo "pack trust failed! Can't find: ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini"
-			return
-		fi
-
-		# OP-TEE is 132M(0x8400000) offset from DRAM base.
-		DARM_BASE=`sed -n "/CONFIG_SYS_SDRAM_BASE=/s/CONFIG_SYS_SDRAM_BASE=//p" ${OUTDIR}/include/autoconf.mk|tr -d '\r'`
-		TEE_LOAD_ADDR=$((DARM_BASE+TEE_OFFSET))
-
-		# Convert Dec to Hex
-		TEE_LOAD_ADDR=$(echo "obase=16;${TEE_LOAD_ADDR}"|bc)
-
-		# Parse orignal path
-		TOS=`sed -n "/TOS=/s/TOS=//p" ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini|tr -d '\r'`
-		TOS_TA=`sed -n "/TOSTA=/s/TOSTA=//p" ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini|tr -d '\r'`
-
-		# replace "./tools/rk_tools/" with "./" to compatible legacy ini content of rkdevelop branch
-		TOS=$(echo ${TOS} | sed "s/tools\/rk_tools\//\.\//g")
-		TOS_TA=$(echo ${TOS_TA} | sed "s/tools\/rk_tools\//\.\//g")
-
-		if [ $TOS_TA ]; then
-			${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS_TA} ./trust.img ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
-		elif [ $TOS ]; then
-			${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS}    ./trust.img ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
+		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini
+		if [ "${mode}" = 'all' ]; then
+			files=`ls ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS*.ini`
+			for ini in $files
+			do
+				__pack_32bit_trust_image ${ini}
+			done
 		else
-			echo "Can't find any tee bin"
-			exit 1
+			__pack_32bit_trust_image ${ini}
 		fi
-
-		echo "pack trust okay! Input: ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini"
 	fi
 }
 

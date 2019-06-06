@@ -12,6 +12,7 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#if !defined(CONFIG_SPL_BUILD) && !defined(CONFIG_TPL_BUILD)
 #define SDRAM_OFFSET(offset)		(CONFIG_SYS_SDRAM_BASE + (offset))
 #define PARAM_DRAM_INFO_OFFSET		(SZ_32M)
 #define PARAM_OPTEE_INFO_OFFSET		(SZ_32M + SZ_2M)
@@ -144,9 +145,12 @@ struct memblock param_parse_common_resv_mem(void)
 {
 	struct memblock mem;
 
+#ifdef CONFIG_ARM64
 	mem.base = SDRAM_OFFSET(SZ_1M);
 	mem.size = SZ_1M;
-
+#else
+	mem.size = 0;
+#endif
 	return mem;
 }
 
@@ -158,6 +162,7 @@ int param_parse_bootdev(char **devtype, char **devnum)
 	t = atags_get_tag(ATAG_BOOTDEV);
 	if (t) {
 		switch (t->u.bootdev.devtype) {
+#ifdef CONFIG_DM_MMC
 		case BOOT_TYPE_EMMC:
 			*devtype = "mmc";
 			*devnum = "0";
@@ -166,23 +171,47 @@ int param_parse_bootdev(char **devtype, char **devnum)
 		case BOOT_TYPE_SD1:
 			*devtype = "mmc";
 			*devnum = "1";
+			/*
+			 * If preloader does not pass sdupdate value, we treat it
+			 * as a unknown card and call the rkimgtest cmd to find
+			 * out what it is.
+			 *
+			 * If preloader pass sdupdate value as an update card,
+			 * we just set "sdfwupdate" to bootargs instead of
+			 * calling rkimgtest cmd which consumes time.
+			 */
+			if (t->u.bootdev.sdupdate == SD_UNKNOWN_CARD) {
+				run_command("mmc dev 1", 0);
+				run_command("rkimgtest mmc 1", 0);
+			} else if (t->u.bootdev.sdupdate == SD_UPDATE_CARD) {
+				env_update("bootargs", "sdfwupdate");
+			}
 			break;
+#endif
+#if defined(CONFIG_RKNAND) || defined(CONFIG_RKNANDC_NAND)
 		case BOOT_TYPE_NAND:
 			*devtype = "rknand";
 			*devnum = "0";
 			break;
+#endif
+#ifdef CONFIG_RKSFC_NAND
 		case BOOT_TYPE_SPI_NAND:
 			*devtype = "spinand";
 			*devnum = "0";
 			break;
+#endif
+#ifdef CONFIG_RKSFC_NOR
 		case BOOT_TYPE_SPI_NOR:
 			*devtype = "spinor";
 			*devnum = "1";
 			break;
+#endif
+#ifdef CONFIG_DM_RAMDISK
 		case BOOT_TYPE_RAM:
 			*devtype = "ramdisk";
 			*devnum = "0";
 			break;
+#endif
 		default:
 			printf("Unknown bootdev type: 0x%x\n",
 			       t->u.bootdev.devtype);
@@ -195,6 +224,7 @@ int param_parse_bootdev(char **devtype, char **devnum)
 
 	return -ENOSYS;
 }
+#endif
 
 struct memblock *param_parse_ddr_mem(int *out_count)
 {

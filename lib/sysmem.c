@@ -200,13 +200,22 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 	int i;
 
 	if (!sysmem_has_init())
-		return NULL;
+		goto out;
 
 	if (id == MEMBLK_ID_BY_NAME || id == MEMBLK_ID_FDT_RESV) {
 		if (!mem_name) {
 			SYSMEM_E("NULL name for alloc sysmem\n");
-			return NULL;
+			goto out;
 		} else if (id == MEMBLK_ID_FDT_RESV) {
+
+			/*
+			 * Allow fdt reserved memory to overlap with the region
+			 * only used in U-Boot, like: stack, fastboot, u-boot...
+			 * these regions are marked as M_ATTR_OVERLAP in flags.
+			 *
+			 * Here we check whether it overlaps with others, if
+			 * so, set req_overlap as true.
+			 */
 			for (i = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
 				if (!gd->bd->bi_dram[i].size)
 					continue;
@@ -220,9 +229,15 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 				}
 			}
 
+			/*
+			 * If this request region is out size of all available
+			 * region, ignore and return success.
+			 */
 			if (!req_overlap)
 				return (void *)base;
 		}
+
+		/* Find name, id and attr by outer mem_name */
 		name = sysmem_alias2name(mem_name, (int *)&id);
 		attr = mem_attr[id];
 		if (!attr.name)
@@ -230,20 +245,29 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 	} else if (id > MEMBLK_ID_UNK && id < MEMBLK_ID_MAX) {
 		attr = mem_attr[id];
 		name = attr.name;
+
+		/*
+		 * Fixup base and place right after U-Boot stack, adding a lot
+		 * of space(4KB) maybe safer.
+		 */
+		if ((id == MEMBLK_ID_AVB_ANDROID) &&
+		    (base == SYSMEM_ALLOC_ANYWHERE))
+			base = gd->start_addr_sp -
+					CONFIG_SYS_STACK_SIZE - size - 0x1000;
 	} else {
 		SYSMEM_E("Unsupport memblk id %d for alloc sysmem\n", id);
-		return NULL;
+		goto out;
 	}
 
 	if (!size) {
 		SYSMEM_E("\"%s\" size is 0 for alloc sysmem\n", name);
-		return NULL;
+		goto out;
 	}
 
 	if (!IS_ALIGNED(base, 4)) {
 		SYSMEM_E("\"%s\" base=0x%08lx is not 4-byte aligned\n",
 			 name, (ulong)base);
-		return NULL;
+		goto out;
 	}
 
 	/* Must be 4-byte aligned */
@@ -259,12 +283,17 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 			 mem->attr.name, (ulong)mem->base,
 			 (ulong)(mem->base + mem->size));
 		if (!strcmp(mem->attr.name, name)) {
+			/* Allow double alloc for same but smaller region */
 			if (mem->base <= base && mem->size >= size)
 				return (void *)base;
 
 			SYSMEM_E("Failed to double alloc for existence \"%s\"\n", name);
-			return NULL;
+			goto out;
 		} else if (sysmem_is_overlap(mem->base, mem->size, base, size)) {
+			/*
+			 * If this new alloc region expects overlap and the old
+			 * region is also allowed to be overlap, just do reserve.
+			 */
 			if (req_overlap && mem->attr.flags & M_ATTR_OVERLAP) {
 				if (lmb_reserve(&sysmem->lmb, base, size))
 					SYSMEM_E("Failed to overlap alloc \"%s\" "
@@ -280,7 +309,7 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 				 name, (ulong)base, (ulong)(base + size),
 				 mem->attr.name, (ulong)mem->base,
 				 (ulong)(mem->base + mem->size));
-			return NULL;
+			goto out;
 		}
 	}
 
@@ -302,7 +331,7 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 			mem = malloc(sizeof(*mem));
 			if (!mem) {
 				SYSMEM_E("No memory for \"%s\" alloc sysmem\n", name);
-				return NULL;
+				goto out;
 			}
 
 			mem->base = paddr;
@@ -311,6 +340,7 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 			sysmem->allocated_cnt++;
 			list_add_tail(&mem->node, &sysmem->allocated_head);
 
+			/* Add overflow check magic */
 			if (mem->attr.flags & M_ATTR_OFC) {
 				check = (struct memcheck *)(paddr + size);
 				check->magic = SYSMEM_MAGIC;
@@ -323,20 +353,40 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 				 "but at 0x%08lx - x%08lx\n",
 				 name, (ulong)base, (ulong)(base + size),
 				 (ulong)paddr, (ulong)(paddr + size));
-			if (lmb_free(&sysmem->lmb, paddr, alloc_size))
+			/* Free what we don't want allocated region */
+			if (lmb_free(&sysmem->lmb, paddr, alloc_size) < 0)
 				SYSMEM_E("Failed to free \"%s\"\n", name);
 
-			return NULL;
+			goto out;
 		}
 	} else {
 		SYSMEM_E("Failed to alloc \"%s\" at 0x%08lx - 0x%08lx\n",
 			 name, (ulong)base, (ulong)(base + size));
+		goto out;
 	}
 
 	SYSMEM_D("Exit alloc: \"%s\", paddr=0x%08lx, size=0x%08lx, align=0x%x, anywhere=%d\n",
 		 name, (ulong)paddr, (ulong)size, (u32)align, !base);
 
 	return (void *)paddr;
+
+out:
+	return (attr.flags & M_ATTR_PEEK) ? (void *)base : NULL;
+}
+
+void *sysmem_alloc(enum memblk_id id, phys_size_t size)
+{
+	void *paddr;
+
+	paddr = sysmem_alloc_align_base(id,
+					NULL,
+					SYSMEM_ALLOC_ANYWHERE,
+					size,
+					SYSMEM_ALLOC_NO_ALIGN);
+	if (!paddr)
+		sysmem_dump();
+
+	return paddr;
 }
 
 void *sysmem_alloc_base(enum memblk_id id, phys_addr_t base, phys_size_t size)
@@ -384,6 +434,38 @@ void *sysmem_fdt_reserve_alloc_base(const char *name,
 		sysmem_dump();
 
 	return paddr;
+}
+
+bool sysmem_can_alloc(phys_size_t base, phys_size_t size)
+{
+	struct sysmem *sysmem = &plat_sysmem;
+	phys_addr_t alloc_base;
+	phys_addr_t paddr;
+	int ret;
+
+	if (!sysmem_has_init())
+		return false;
+
+	/* LMB is align down alloc mechanism */
+	alloc_base = base + size;
+	paddr = __lmb_alloc_base(&sysmem->lmb,
+				 size,
+				 SYSMEM_ALLOC_NO_ALIGN,
+				 alloc_base);
+	if (paddr) {
+		/* If free failed, return false */
+		ret = lmb_free(&sysmem->lmb, base, size);
+		if (ret < 0) {
+			SYSMEM_E("Can't free at 0x%08lx - 0x%08lx, ret=%d\n",
+				 (ulong)base, (ulong)(base + size), ret);
+			return false;
+		}
+	} else {
+		SYSMEM_D("Can't alloc at 0x%08lx - 0x%08lx\n",
+			 (ulong)base, (ulong)(base + size));
+	}
+
+	return (paddr == base) ? true : false;
 }
 
 int sysmem_free(phys_addr_t base)

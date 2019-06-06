@@ -233,6 +233,7 @@ config CMD_BOOTMENU
 
 config CMD_DTIMG
 	bool "dtimg"
+	select OF_LIBFDT_OVERLAY
 	help
 	  Android DTB/DTBO image manipulation commands. Read dtb/dtbo files from
 	  image into RAM, dump image structure information, etc. Those dtb/dtbo
@@ -530,6 +531,15 @@ config CMD_STRINGS
 	  works with a memory range. String of printable characters found
 	  within the range are displayed. The minimum number of characters
 	  for a sequence to be considered a string can be provided.
+
+config CMD_CRYPTO
+	bool "crypto test"
+	depends on DM_CRYPTO
+	select SHA1
+	select SHA256
+	select MD5
+	help
+	  Crypto test.
 
 endmenu
 
@@ -1298,6 +1308,8 @@ config CMD_REGULATOR
 
 config CMD_CHARGE_DISPLAY
 	bool "Enable Driver Model Charge Display command"
+	depends on DM_CHARGE_DISPLAY
+	default y
 	help
 	  Support U-Boot charge display.
 
