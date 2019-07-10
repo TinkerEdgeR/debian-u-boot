@@ -6,6 +6,7 @@
 
 #include <common.h>
 #include <bootm.h>
+#include <mmc.h>
 #include <linux/list.h>
 #include <linux/libfdt.h>
 #include <malloc.h>
@@ -197,6 +198,9 @@ int get_bootdev_type(void)
 	} else if (!strcmp(devtype, "ramdisk")) {
 		type = IF_TYPE_RAMDISK;
 		boot_media = "ramdisk";
+	} else if (!strcmp(devtype, "mtd")) {
+		type = IF_TYPE_MTD;
+		boot_media = "mtd";
 	} else {
 		/* Add new to support */
 	}
@@ -229,13 +233,28 @@ int get_bootdev_type(void)
 				 "storagemedia=%s androidboot.mode=%s",
 				 boot_media, boot_media);
 #else
+		/*
+		 * 1. "storagemedia": This is a legacy variable to indicate board
+		 *    storage media for kernel and android.
+		 *
+		 * 2. "androidboot.storagemedia": The same purpose as "storagemedia",
+		 *    but the android framework will auto create property by
+		 *    variable with format "androidboot.xxx", eg:
+		 *
+		 *    "androidboot.storagemedia" => "ro.boot.storagemedia".
+		 *
+		 *    So, U-Boot pass this new variable is only for the convenience
+		 *    to Android.
+		 */
 		if (env_exist("bootargs", "androidboot.mode=charger"))
 			snprintf(boot_options, sizeof(boot_options),
-				 "storagemedia=%s", boot_media);
+				 "storagemedia=%s androidboot.storagemedia=%s",
+				 boot_media, boot_media);
 		else
 			snprintf(boot_options, sizeof(boot_options),
-				 "storagemedia=%s androidboot.mode=normal",
-				 boot_media);
+				 "storagemedia=%s androidboot.storagemedia=%s "
+				 "androidboot.mode=normal ",
+				 boot_media, boot_media);
 #endif
 		env_update("bootargs", boot_options);
 	}
@@ -261,6 +280,20 @@ struct blk_desc *rockchip_get_bootdev(void)
 		printf("%s: can't find dev_desc!\n", __func__);
 		return NULL;
 	}
+
+#ifdef CONFIG_MMC
+	if (dev_type == IF_TYPE_MMC) {
+		struct mmc *mmc;
+		const char *timing[] = {
+			"Legacy", "High Speed", "High Speed", "SDR12",
+			"SDR25", "SDR50", "SDR104", "DDR50",
+			"DDR52", "HS200", "HS400", "HS400 Enhanced Strobe"};
+
+		mmc = find_mmc_device(devnum);
+		printf("MMC%d: %s, %dMhz\n", devnum,
+		        timing[mmc->timing], mmc->clock / 1000000);
+	}
+#endif
 
 	printf("PartType: %s\n", part_get_type(dev_desc));
 
@@ -360,6 +393,7 @@ int rockchip_get_boot_mode(void)
 	int ret;
 	uint32_t reg_boot_mode;
 	char *env_reboot_mode;
+	int clear_boot_reg = 0;
 
 	/*
 	 * Here, we mainly check for:
@@ -402,44 +436,68 @@ int rockchip_get_boot_mode(void)
 	}
 
 fallback:
-	/* Mode from misc partition */
-	if (bmsg && !strcmp(bmsg->command, "boot-recovery")) {
-		boot_mode = BOOT_MODE_RECOVERY;
+	/*
+	 * Boot mode priority
+	 *
+	 * Anyway, we should set download boot mode as the highest priority, so:
+	 *
+	 * reboot loader/bootloader/fastboot > misc partition "recovery" > reboot xxx.
+	 */
+	reg_boot_mode = readl((void *)CONFIG_ROCKCHIP_BOOT_MODE_REG);
+	if (reg_boot_mode == BOOT_LOADER) {
+		printf("boot mode: loader\n");
+		boot_mode = BOOT_MODE_LOADER;
+		clear_boot_reg = 1;
+	} else if (reg_boot_mode == BOOT_FASTBOOT) {
+		printf("boot mode: bootloader\n");
+		boot_mode = BOOT_MODE_BOOTLOADER;
+		clear_boot_reg = 1;
+	} else if (bmsg && !strcmp(bmsg->command, "boot-recovery")) {
 		printf("boot mode: recovery\n");
+		boot_mode = BOOT_MODE_RECOVERY;
+		clear_boot_reg = 1;
 	} else {
-		/* Mode from boot mode register */
-		reg_boot_mode = readl((void *)CONFIG_ROCKCHIP_BOOT_MODE_REG);
-
 		switch (reg_boot_mode) {
 		case BOOT_NORMAL:
 			printf("boot mode: normal\n");
 			boot_mode = BOOT_MODE_NORMAL;
-			break;
-		case BOOT_FASTBOOT:
-			printf("boot mode: bootloader\n");
-			boot_mode = BOOT_MODE_BOOTLOADER;
-			break;
-		case BOOT_LOADER:
-			printf("boot mode: loader\n");
-			boot_mode = BOOT_MODE_LOADER;
+			clear_boot_reg = 1;
 			break;
 		case BOOT_RECOVERY:
 			/* printf("boot mode: recovery\n"); */
 			boot_mode = BOOT_MODE_RECOVERY;
+			clear_boot_reg = 1;
 			break;
 		case BOOT_UMS:
 			printf("boot mode: ums\n");
 			boot_mode = BOOT_MODE_UMS;
+			clear_boot_reg = 1;
 			break;
 		case BOOT_CHARGING:
 			printf("boot mode: charging\n");
 			boot_mode = BOOT_MODE_CHARGING;
+			clear_boot_reg = 1;
+			break;
+		case BOOT_PANIC:
+			printf("boot mode: panic\n");
+			boot_mode = BOOT_MODE_PANIC;
+			break;
+		case BOOT_WATCHDOG:
+			printf("boot mode: watchdog\n");
+			boot_mode = BOOT_MODE_WATCHDOG;
 			break;
 		default:
 			printf("boot mode: None\n");
 			boot_mode = BOOT_MODE_UNDEFINE;
 		}
 	}
+
+	/*
+	 * We don't clear boot mode reg when its value stands for the reboot
+	 * reason or others(in the future), the kernel will need and clear it.
+	 */
+	if (clear_boot_reg)
+		writel(BOOT_NORMAL, (void *)CONFIG_ROCKCHIP_BOOT_MODE_REG);
 
 	return boot_mode;
 }
@@ -526,6 +584,9 @@ int boot_rockchip_image(struct blk_desc *dev_desc, disk_partition_t *boot_part)
 	fdt_ramdisk_skip_relocation();
 	hotkey_run(HK_SYSMEM);
 
+	/* Check sysmem overflow */
+	sysmem_overflow_check();
+
 #if defined(CONFIG_ARM64)
 	char cmdbuf[64];
 	sprintf(cmdbuf, "booti 0x%lx 0x%lx:0x%x 0x%lx",
@@ -551,6 +612,9 @@ int boot_rockchip_image(struct blk_desc *dev_desc, disk_partition_t *boot_part)
 	}
 
 	hotkey_run(HK_SYSMEM);
+
+	/* Check sysmem overflow */
+	sysmem_overflow_check();
 
 	boot_lmb_init(&images);
 	images.ep = kernel_addr_r;

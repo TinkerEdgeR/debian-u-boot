@@ -455,6 +455,16 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 #endif
 
 	memset(&spl_image, '\0', sizeof(spl_image));
+
+#if CONFIG_IS_ENABLED(ATF)
+	/*
+	 * Bl32 ep is optional, initial it as an invalid value.
+	 * BL33 ep is mandatory, but initial it as a default value is better.
+	 */
+	spl_image.entry_point_bl32 = -1;
+	spl_image.entry_point_bl33 = CONFIG_SYS_TEXT_BASE;
+#endif
+
 #ifdef CONFIG_SYS_SPL_ARGS_ADDR
 	spl_image.arg = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
 #endif
@@ -475,7 +485,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 		break;
 #if CONFIG_IS_ENABLED(ATF)
 	case IH_OS_ARM_TRUSTED_FIRMWARE:
-		debug("Jumping to U-Boot via ARM Trusted Firmware\n");
+		printf("Jumping to U-Boot via ARM Trusted Firmware\n\n");
 		spl_invoke_atf(&spl_image);
 		break;
 #endif

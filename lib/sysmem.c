@@ -123,6 +123,41 @@ void sysmem_dump(void)
 	printf("    --------------------------------------------------------------------\n\n");
 }
 
+void sysmem_overflow_check(void)
+{
+	struct sysmem *sysmem = &plat_sysmem;
+	struct list_head *node;
+	struct memcheck *check;
+	struct memblock *mem;
+	int overflow;
+
+	if (!sysmem_has_init())
+		return;
+
+	list_for_each(node, &sysmem->allocated_head) {
+		mem = list_entry(node, struct memblock, node);
+		if (mem->attr.flags & M_ATTR_OFC) {
+			check = (struct memcheck *)
+				(mem->base + mem->size - sizeof(*check));
+			overflow = (check->magic != SYSMEM_MAGIC);
+		} else if (mem->attr.flags & M_ATTR_HOFC) {
+			check = (struct memcheck *)
+				(mem->base - sizeof(*check));
+			overflow = (check->magic != SYSMEM_MAGIC);
+		} else {
+			overflow = 0;
+		}
+
+		if (overflow)
+			break;
+	}
+
+	if (overflow) {
+		SYSMEM_E("Found there is region overflow!\n");
+		sysmem_dump();
+	}
+}
+
 static inline int sysmem_is_overlap(phys_addr_t base1, phys_size_t size1,
 				    phys_addr_t base2, phys_size_t size2)
 {
@@ -274,6 +309,19 @@ static void *sysmem_alloc_align_base(enum memblk_id id,
 	if (!size) {
 		SYSMEM_E("\"%s\" size is 0 for alloc sysmem\n", name);
 		goto out;
+	}
+
+	/*
+	 * Some modules use "sysmem_alloc()" to alloc region for storage
+	 * read/write buffer, it should be aligned to cacheline size. eg: AVB.
+	 *
+	 * Aligned down to cacheline size if not aligned, otherwise the tail
+	 * of region maybe overflow.
+	 */
+	if (attr.flags & M_ATTR_CACHELINE_ALIGN &&
+	    !IS_ALIGNED(base, ARCH_DMA_MINALIGN)) {
+		base = ALIGN(base, ARCH_DMA_MINALIGN);
+		base -= ARCH_DMA_MINALIGN;
 	}
 
 	if (!IS_ALIGNED(base, 4)) {

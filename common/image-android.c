@@ -251,8 +251,8 @@ int android_image_get_fdt(const struct andr_img_hdr *hdr,
 	*rd_data += ALIGN(hdr->ramdisk_size, hdr->page_size);
 #endif
 
-	printf("FDT load addr 0x%08x size %u KiB\n",
-	       hdr->second_addr, DIV_ROUND_UP(hdr->second_size, 1024));
+	debug("FDT load addr 0x%08x size %u KiB\n",
+	      hdr->second_addr, DIV_ROUND_UP(hdr->second_size, 1024));
 
 	return 0;
 }
@@ -286,7 +286,7 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 			ret = blk_dread(dev_desc, blk_start,
 					blk_cnt, load_address);
 			if (ret != blk_cnt) {
-				debug("%s: read kernel failed, ret=%d\n",
+				printf("%s: read kernel failed, ret=%d\n",
 				      __func__, ret);
 				return -1;
 			}
@@ -315,7 +315,7 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 			ret = blk_dread(dev_desc, blk_start,
 					blk_cnt, (void *)ramdisk_addr_r);
 			if (ret != blk_cnt) {
-				debug("%s: read ramdisk failed, ret=%d\n",
+				printf("%s: read ramdisk failed, ret=%d\n",
 				      __func__, ret);
 				return -1;
 			}
@@ -362,7 +362,7 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 			ret = blk_dread(dev_desc, blk_start, blk_cnt,
 					(void *)fdt_addr_r);
 			if (ret != blk_cnt) {
-				debug("%s: read dtb failed, ret=%d\n",
+				printf("%s: read dtb failed, ret=%d\n",
 				      __func__, ret);
 				return -1;
 			}

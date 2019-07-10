@@ -9,6 +9,7 @@ set -e
 BOARD=$1
 SUBCMD=$1
 FUNCADDR=$1
+FILE=$2
 JOB=`sed -n "N;/processor/p" /proc/cpuinfo|wc -l`
 SUPPORT_LIST=`ls configs/*[r,p][x,v,k][0-9][0-9]*_defconfig`
 
@@ -119,7 +120,7 @@ prepare()
 	else
 		case $BOARD in
 			# Parse from exit .config
-			''|elf*|loader*|debug*|trust*|uboot|map|sym)
+			''|elf*|loader*|spl*|itb|debug*|trust|uboot|map|sym)
 			count=`find -name .config | wc -l`
 			dir=`find -name .config`
 			# Good, find only one .config
@@ -159,7 +160,7 @@ prepare()
 		;;
 
 		#Subcmd
-		''|elf*|loader*|debug*|trust*|uboot|map|sym)
+		''|elf*|loader*|spl*|itb|debug*|trust*|uboot|map|sym)
 		;;
 
 		*)
@@ -229,18 +230,25 @@ select_toolchain()
 sub_commands()
 {
 	local cmd=${SUBCMD%-*} opt=${SUBCMD#*-}
+	local elf=${OUTDIR}/u-boot map=${OUTDIR}/u-boot.map sym=${OUTDIR}/u-boot.sym
+
+	if [ "$FILE" == "tpl" -o "$FILE" == "spl" ]; then
+		elf=`find -name u-boot-${FILE}`
+		map=`find -name u-boot-${FILE}.map`
+		sym=`find -name u-boot-${FILE}.sym`
+	fi
 
 	case $cmd in
 		elf)
-		if [ ! -f ${OUTDIR}/u-boot ]; then
-			echo "Can't find elf file: ${OUTDIR}/u-boot"
+		if [ -o ! -f ${elf} ]; then
+			echo "Can't find elf file: ${elf}"
 			exit 1
 		else
 			# default 'cmd' without option, use '-D'
 			if [ "${cmd}" = 'elf' -a "${opt}" = 'elf' ]; then
 				opt=D
 			fi
-			${TOOLCHAIN_OBJDUMP} -${opt} ${OUTDIR}/u-boot | less
+			${TOOLCHAIN_OBJDUMP} -${opt} ${elf} | less
 			exit 0
 		fi
 		;;
@@ -251,12 +259,12 @@ sub_commands()
 		;;
 
 		map)
-		cat ${OUTDIR}/u-boot.map | less
+		cat ${map} | less
 		exit 0
 		;;
 
 		sym)
-		cat ${OUTDIR}/u-boot.sym | less
+		cat ${sym} | less
 		exit 0
 		;;
 
@@ -267,6 +275,16 @@ sub_commands()
 
 		loader)
 		pack_loader_image ${opt}
+		exit 0
+		;;
+
+		spl)
+		pack_spl_loader_image ${opt}
+		exit 0
+		;;
+
+		itb)
+		pack_uboot_itb_image
 		exit 0
 		;;
 
@@ -300,8 +318,8 @@ sub_commands()
 			fi
 
 			echo
-			sed -n "/${FUNCADDR}/p" ${OUTDIR}/u-boot.sym
-			${TOOLCHAIN_ADDR2LINE} -e ${OUTDIR}/u-boot ${FUNCADDR}
+			sed -n "/${FUNCADDR}/p" ${sym}
+			${TOOLCHAIN_ADDR2LINE} -e ${elf} ${FUNCADDR}
 			exit 0
 		fi
 		;;
@@ -545,16 +563,107 @@ pack_uboot_image()
 	echo "pack uboot okay! Input: ${OUTDIR}/u-boot.bin"
 }
 
+pack_uboot_itb_image()
+{
+	local ini
+
+	# ARM64
+	if grep -Eq ''^CONFIG_ARM64=y'|'^CONFIG_ARM64_BOOT_AARCH32=y'' ${OUTDIR}/.config ; then
+		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini
+		if [ ! -f ${ini} ]; then
+			echo "pack trust failed! Can't find: ${ini}"
+			return
+		fi
+
+		bl31=`sed -n '/_bl31_/s/PATH=//p' ${ini} |tr -d '\r'`
+
+		cp ${RKBIN}/${bl31} bl31.elf
+		make CROSS_COMPILE=${TOOLCHAIN_GCC} u-boot.itb
+		echo "pack u-boot.itb okay! Input: ${ini}"
+	else
+		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini
+		if [ ! -f ${ini} ]; then
+			echo "pack trust failed! Can't find: ${ini}"
+			return
+		fi
+
+		TOS=`sed -n "/TOS=/s/TOS=//p" ${ini} |tr -d '\r'`
+		TOS_TA=`sed -n "/TOSTA=/s/TOSTA=//p" ${ini} |tr -d '\r'`
+
+		if [ $TOS_TA ]; then
+			cp ${RKBIN}/${TOS_TA} tee.bin
+		elif [ $TOS ]; then
+			cp ${RKBIN}/${TOS} tee.bin
+		else
+			echo "Can't find any tee bin"
+			exit 1
+		fi
+
+		make CROSS_COMPILE=${TOOLCHAIN_GCC} u-boot.itb
+		echo "pack u-boot.itb okay! Input: ${ini}"
+	fi
+}
+
+pack_spl_loader_image()
+{
+	local header label="SPL" mode=$1
+	local ini=${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini
+	local temp_ini=${RKBIN}/.temp/${RKCHIP_LOADER}MINIALL.ini
+
+	if [ "$FILE" != "" ]; then
+		ini=$FILE;
+	fi
+
+	if [ ! -f ${ini} ]; then
+		echo "pack TPL+SPL loader failed! Can't find: ${ini}"
+		return
+	fi
+
+	# Copy to .temp folder
+	if [ -d ${RKBIN}/.temp ]; then
+		rm ${RKBIN}/.temp -rf
+	else
+		mkdir ${RKBIN}/.temp
+	fi
+	cp ${OUTDIR}/spl/u-boot-spl.bin ${RKBIN}/.temp/
+	cp ${OUTDIR}/tpl/u-boot-tpl.bin ${RKBIN}/.temp/
+	cp ${ini} ${RKBIN}/.temp/${RKCHIP_LOADER}MINIALL.ini -f
+
+	cd ${RKBIN}
+	if [ "$mode" = 'spl' ]; then	# pack tpl+spl
+		# Update ini
+		label="TPL+SPL"
+		header=`sed -n '/NAME=/s/NAME=//p' ${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini`
+		dd if=${RKBIN}/.temp/u-boot-tpl.bin of=${RKBIN}/.temp/tpl.bin bs=1 skip=4
+		sed -i "1s/^/${header:0:4}/" ${RKBIN}/.temp/tpl.bin
+		sed -i "s/FlashData=.*$/FlashData=.\/.temp\/tpl.bin/"     ${temp_ini}
+	fi
+
+	sed -i "s/FlashBoot=.*$/FlashBoot=.\/.temp\/u-boot-spl.bin/"  ${temp_ini}
+
+	${RKTOOLS}/boot_merger ${BIN_PATH_FIXUP} ${temp_ini}
+	rm ${RKBIN}/.temp -rf
+	cd -
+	ls *_loader_*.bin >/dev/null 2>&1 && rm *_loader_*.bin
+	mv ${RKBIN}/*_loader_*.bin ./
+	echo "pack loader(${label}) okay! Input: ${ini}"
+	ls ./*_loader_*.bin
+}
+
 pack_loader_image()
 {
 	local mode=$1 files ini=${RKBIN}/RKBOOT/${RKCHIP_LOADER}MINIALL.ini
+
+	if [ "$FILE" != "" ]; then
+		ini=$FILE;
+	fi
 
 	if [ ! -f $ini ]; then
 		echo "pack loader failed! Can't find: $ini"
 		return
 	fi
 
-	ls *_loader_*.bin >/dev/null && rm *_loader_*.bin
+	ls *_loader_*.bin >/dev/null 2>&1 && rm *_loader_*.bin
 	cd ${RKBIN}
 
 	if [ "${mode}" = 'all' ]; then
@@ -647,6 +756,10 @@ pack_trust_image()
 	# ARM64 uses trust_merger
 	if grep -Eq ''^CONFIG_ARM64=y'|'^CONFIG_ARM64_BOOT_AARCH32=y'' ${OUTDIR}/.config ; then
 		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}TRUST.ini
+		if [ "$FILE" != "" ]; then
+			ini=$FILE;
+		fi
+
 		if [ "${mode}" = 'all' ]; then
 			files=`ls ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TRUST*.ini`
 			for ini in $files
@@ -659,6 +772,9 @@ pack_trust_image()
 	# ARM uses loaderimage
 	else
 		ini=${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS.ini
+		if [ "$FILE" != "" ]; then
+			ini=$FILE;
+		fi
 		if [ "${mode}" = 'all' ]; then
 			files=`ls ${RKBIN}/RKTRUST/${RKCHIP_TRUST}TOS*.ini`
 			for ini in $files
