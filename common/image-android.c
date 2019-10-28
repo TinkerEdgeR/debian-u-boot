@@ -34,6 +34,7 @@ struct hw_config
 {
 	int valid;
 
+	int fiq_debugger;
 	int uart0, uart4;
 	int i2s0;
 	int spi1, spi5;
@@ -69,10 +70,22 @@ static unsigned long hw_skip_line(char *text)
 static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 {
 	int i = 0;
-	if(memcmp(text, "uart0=",  6) == 0) {
+	if(memcmp(text, "fiq_debugger=",  13) == 0) {
+		i = 13;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->fiq_debugger = 1;
+			hw_conf->uart0 = -1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->fiq_debugger = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+	} else if(memcmp(text, "uart0=",  6) == 0) {
 		i = 6;
 		if(memcmp(text + i, "on", 2) == 0) {
-			hw_conf->uart0 = 1;
+			if(hw_conf->fiq_debugger != 1)
+				hw_conf->uart0 = 1;
 			i = i + 2;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->uart0 = -1;
@@ -501,6 +514,11 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 		free(hw_conf->overlay_file[i]);
 	}
 #endif
+
+	if (hw_conf->fiq_debugger == 1)
+		set_hw_property(working_fdt, "/fiq-debugger", "status", "okay", 5);
+	else if (hw_conf->fiq_debugger == -1)
+		set_hw_property(working_fdt, "/fiq-debugger", "status", "disabled", 9);
 
 	if (hw_conf->uart0 == 1)
 		set_hw_property(working_fdt, "/serial@ff180000", "status", "okay", 5);
