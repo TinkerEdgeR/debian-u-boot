@@ -5,6 +5,7 @@
  */
 
 #include <common.h>
+#include <adc.h>
 #include <image.h>
 #include <android_image.h>
 #include <android_bootloader.h>
@@ -38,7 +39,7 @@ struct hw_config
 	int spi1, spi5;
 	int pwm0, pwm1, pwm3a;
 
-	int gmac;
+	int gmac, adc5_bid;
 
 	int overlay_count;
 	char **overlay_file;
@@ -465,6 +466,25 @@ fail:
 }
 #endif
 
+static void handle_adc5_bid(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, struct hw_config *hw_conf)
+{
+	if(working_fdt == NULL)
+		return;
+
+	if (hw_conf->adc5_bid == -1)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "-1", 3);
+	else if (hw_conf->adc5_bid == 0)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "0", 2);
+	else if (hw_conf->adc5_bid == 1)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "1", 2);
+	else if (hw_conf->adc5_bid == 2)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "2", 2);
+	else if (hw_conf->adc5_bid == 3)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "3", 2);
+	else if (hw_conf->adc5_bid == 4)
+		set_hw_property(working_fdt, "/ADC5-BOARD-ID", "boardver", "4", 2);
+}
+
 static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, struct hw_config *hw_conf)
 {
 	if(working_fdt == NULL)
@@ -766,6 +786,10 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 	int ret, blk_read = 0;
 	ulong start;
 
+	unsigned int in_voltage5_raw;
+	float voltage_scale = 1.8066, voltage5_raw, vresult;
+	int adc5_channel = 5;
+
 	struct fdt_header *working_fdt;
 	struct hw_config hw_conf;
 	memset(&hw_conf, 0, sizeof(struct hw_config));
@@ -786,6 +810,25 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 
 		for (int i = 0; i < hw_conf.overlay_count; i++)
 			printf("get overlay name: %s\n", hw_conf.overlay_file[i]);
+	}
+
+	ret = adc_channel_single_shot("saradc", adc5_channel, &in_voltage5_raw);
+	if (ret)
+		hw_conf.adc5_bid = -1;
+	else {
+		voltage5_raw = (float)in_voltage5_raw;
+		vresult = voltage5_raw * voltage_scale;
+
+		if (vresult < 1900 && vresult > 1700)
+			hw_conf.adc5_bid = 2;
+		else if (vresult < 1300 && vresult > 1100)
+			hw_conf.adc5_bid = 4;
+		else if (vresult < 1000 && vresult > 800)
+			hw_conf.adc5_bid = 1;
+		else if (vresult < 100)
+			hw_conf.adc5_bid = 3;
+		else
+			hw_conf.adc5_bid = 0;
 	}
 
 	if (hdr->kernel_size) {
@@ -905,6 +948,8 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 
 	working_fdt = resize_working_fdt();
 	if (working_fdt != NULL) {
+		handle_adc5_bid(NULL, working_fdt, &hw_conf);
+
 		if(hw_conf.valid)
 			handle_hw_conf(NULL, working_fdt, &hw_conf);
 	}
