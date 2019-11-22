@@ -35,6 +35,7 @@ struct hw_config
 	int valid;
 
 	int fiq_debugger;
+	int i2c6, i2c7;
 	int uart0, uart4;
 	int i2s0;
 	int spi1, spi5;
@@ -78,6 +79,26 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			i = i + 2;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->fiq_debugger = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+	} else if(memcmp(text, "i2c6=",  5) == 0) {
+		i = 5;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->i2c6 = 1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->i2c6 = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+	} else if(memcmp(text, "i2c7=",  5) == 0) {
+		i = 5;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->i2c7 = 1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->i2c7 = -1;
 			i = i + 3;
 		} else
 			goto invalid_line;
@@ -520,6 +541,15 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 	else if (hw_conf->fiq_debugger == -1)
 		set_hw_property(working_fdt, "/fiq-debugger", "status", "disabled", 9);
 
+	if (hw_conf->i2c6 == 1)
+		set_hw_property(working_fdt, "/i2c@ff150000", "status", "okay", 5);
+	else if (hw_conf->i2c6 == -1)
+		set_hw_property(working_fdt, "/i2c@ff150000", "status", "disabled", 9);
+	if (hw_conf->i2c7 == 1)
+		set_hw_property(working_fdt, "/i2c@ff160000", "status", "okay", 5);
+	else if (hw_conf->i2c7 == -1)
+		set_hw_property(working_fdt, "/i2c@ff160000", "status", "disabled", 9);
+
 	if (hw_conf->uart0 == 1)
 		set_hw_property(working_fdt, "/serial@ff180000", "status", "okay", 5);
 	else if (hw_conf->uart0 == -1)
@@ -816,6 +846,8 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 	printf("config.txt valid = %d\n", hw_conf.valid);
 	if(hw_conf.valid == 1) {
 		printf("config on: 1, config off: -1, no config: 0\n");
+		printf("intf.i2c6 = %d\n", hw_conf.i2c6);
+		printf("intf.i2c7 = %d\n", hw_conf.i2c7);
 		printf("intf.uart0 = %d\n", hw_conf.uart0);
 		printf("intf.uart4 = %d\n", hw_conf.uart4);
 		printf("intf.i2s0 = %d\n", hw_conf.i2s0);
