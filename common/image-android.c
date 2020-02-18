@@ -388,6 +388,64 @@ static int set_hw_property(struct fdt_header *working_fdt, char *path, char *pro
 	return 0;
 }
 
+static int flash_gpio(struct fdt_header *working_fdt, char *path, char *property)
+{
+	int offset, len;;
+	const fdt32_t *cell;
+
+	int spi1_clk[3] = {1, 9, 0};
+	int spi1_cs0[3] = {1, 10, 0};
+	int spi1_rx[3] = {1, 7, 0};
+	int spi1_tx[3] = {1, 8, 0};
+	int gpio0_a2[4] = {0, 2, 1, 208};
+
+	printf("flash_gpio: %s %s\n", path, property);
+
+	offset = fdt_path_offset (working_fdt, path);
+	if (offset < 0) {
+		printf("libfdt fdt_path_offset() returned %s\n", fdt_strerror(offset));
+		return -1;
+	}
+
+	cell = fdt_getprop(working_fdt, offset, property, &len);
+	if (!cell) {
+		printf("libfdt fdt_getprop() fail\n");
+		return -1;
+	} else {
+		int i, j;
+		uint32_t adj_val;
+		int get_spi1_clk, get_spi1_cs0, get_spi1_rx, get_spi1_tx;
+
+		for (i = 0; i < len; i++) {
+			get_spi1_clk = 1;
+			get_spi1_cs0 = 1;
+			get_spi1_rx = 1;
+			get_spi1_tx = 1;
+
+			for (j = 0; j < 3; j++) {
+				if (fdt32_to_cpu(cell[i + j]) != spi1_clk[j])
+					get_spi1_clk = 0;
+				if (fdt32_to_cpu(cell[i + j]) != spi1_cs0[j])
+					get_spi1_cs0 = 0;
+				if (fdt32_to_cpu(cell[i + j]) != spi1_rx[j])
+					get_spi1_rx = 0;
+				if (fdt32_to_cpu(cell[i + j]) != spi1_tx[j])
+					get_spi1_tx = 0;
+			}
+
+			if (get_spi1_clk || get_spi1_cs0 || get_spi1_rx || get_spi1_tx) {
+				for (j = 0; j < 4; j++) {
+					adj_val = gpio0_a2[j];
+					adj_val = cpu_to_fdt32(adj_val);
+					fdt_setprop_inplace_namelen_partial(working_fdt, offset, property, strlen(property), (i+j)*4, &adj_val, sizeof(adj_val));
+				}
+                        }
+		}
+	}
+
+	return 0;
+}
+
 static struct fdt_header *resize_working_fdt(void)
 {
 	struct fdt_header *working_fdt;
@@ -554,9 +612,10 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 		set_hw_property(working_fdt, "/serial@ff180000", "status", "okay", 5);
 	else if (hw_conf->uart0 == -1)
 		set_hw_property(working_fdt, "/serial@ff180000", "status", "disabled", 9);
-	if (hw_conf->uart4 == 1)
+	if (hw_conf->uart4 == 1) {
 		set_hw_property(working_fdt, "/serial@ff370000", "status", "okay", 5);
-	else if (hw_conf->uart4 == -1)
+		flash_gpio(working_fdt, "/pinctrl/gpio_init_config/gpio_init", "rockchip,pins");
+	} else if (hw_conf->uart4 == -1)
 		set_hw_property(working_fdt, "/serial@ff370000", "status", "disabled", 9);
 
 	if (hw_conf->i2s0 == 1)
@@ -564,9 +623,10 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 	else if (hw_conf->i2s0 == -1)
 		set_hw_property(working_fdt, "/i2s@ff880000", "status", "disabled", 9);
 
-	if (hw_conf->spi1 == 1)
+	if (hw_conf->spi1 == 1) {
 		set_hw_property(working_fdt, "/spi@ff1d0000", "status", "okay", 5);
-	else if (hw_conf->spi1 == -1)
+		flash_gpio(working_fdt, "/pinctrl/gpio_init_config/gpio_init", "rockchip,pins");
+	} else if (hw_conf->spi1 == -1)
 		set_hw_property(working_fdt, "/spi@ff1d0000", "status", "disabled", 9);
 	if (hw_conf->spi5 == 1)
 		set_hw_property(working_fdt, "/spi@ff200000", "status", "okay", 5);
