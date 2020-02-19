@@ -40,6 +40,7 @@ struct hw_config
 	int i2s0;
 	int spi1, spi5;
 	int pwm0, pwm1, pwm3a;
+	int spdif;
 
 	int gmac, adc5_bid;
 
@@ -182,6 +183,16 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			i = i + 2;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->pwm3a = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+	} else if(memcmp(text, "spdif=",  6) == 0) {
+		i = 6;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->spdif = 1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->spdif = -1;
 			i = i + 3;
 		} else
 			goto invalid_line;
@@ -646,6 +657,11 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 	else if (hw_conf->pwm3a == -1)
 		set_hw_property(working_fdt, "/pwm@ff420030", "status", "disabled", 9);
 
+	if (hw_conf->spdif == 1)
+		set_hw_property(working_fdt, "/spdif@ff870000", "status", "okay", 5);
+	else if (hw_conf->spdif == -1)
+		set_hw_property(working_fdt, "/spdif@ff870000", "status", "disabled", 9);
+
 	if (hw_conf->gmac == 1)
 		set_hw_property(working_fdt, "/ethernet@fe300000", "wakeup-enable", "1", 2);
 	else if (hw_conf->gmac == -1)
@@ -916,6 +932,7 @@ int android_image_load_separate(struct andr_img_hdr *hdr,
 		printf("intf.pwm0 = %d\n", hw_conf.pwm0);
 		printf("intf.pwm1 = %d\n", hw_conf.pwm1);
 		printf("intf.pwm3a = %d\n", hw_conf.pwm3a);
+		printf("intf.spdif = %d\n", hw_conf.spdif);
 		printf("conf.gmac = %d\n", hw_conf.gmac);
 
 		for (int i = 0; i < hw_conf.overlay_count; i++)
