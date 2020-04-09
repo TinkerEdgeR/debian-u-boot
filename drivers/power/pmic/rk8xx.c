@@ -144,21 +144,17 @@ static struct virq_chip rk817_irq_chip = {
 };
 #endif
 
-static struct reg_data rk817_init_reg[] = {
-/* enable the under-voltage protection,
- * the under-voltage protection will shutdown the LDO3 and reset the PMIC
- */
-	{ RK817_BUCK4_CMIN, 0x60, 0x60},
 /*
  * Only when system suspend while U-Boot charge needs this config support
  */
 #ifdef CONFIG_DM_CHARGE_DISPLAY
+static struct reg_data rk817_init_reg[] = {
 	/* Set pmic_sleep as sleep function */
 	{ RK817_PMIC_SYS_CFG3, 0x08, 0x18 },
 	/* Set pmic_int active low */
 	{ RK817_GPIO_INT_CFG,  0x00, 0x02 },
-#endif
 };
+#endif
 
 static struct reg_data rk818_init_current[] = {
 	{ REG_USB_CTRL, 0x07, 0x0f}, /* 2A */
@@ -460,8 +456,10 @@ static int rk8xx_probe(struct udevice *dev)
 	case RK817_ID:
 		on_source = RK817_ON_SOURCE;
 		off_source = RK817_OFF_SOURCE;
+#ifdef CONFIG_DM_CHARGE_DISPLAY
 		init_data = rk817_init_reg;
 		init_data_num = ARRAY_SIZE(rk817_init_reg);
+#endif
 		power_en0 = pmic_reg_read(dev, RK817_POWER_EN0);
 		power_en1 = pmic_reg_read(dev, RK817_POWER_EN1);
 		power_en2 = pmic_reg_read(dev, RK817_POWER_EN2);

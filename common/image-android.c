@@ -4,8 +4,8 @@
  * SPDX-License-Identifier:	GPL-2.0+
  */
 
-#include <adc.h>
 #include <common.h>
+#include <adc.h>
 #include <image.h>
 #include <android_image.h>
 #include <android_bootloader.h>
@@ -1061,7 +1061,7 @@ static int android_image_separate(struct andr_img_hdr *hdr,
 
 	unsigned int in_voltage5_raw;
 	float voltage_scale = 1.8066, voltage5_raw, vresult;
-	int adc5_channel = 5;
+	int ret, adc5_channel = 5;
 
 	struct fdt_header *working_fdt;
 	struct hw_config hw_conf;
