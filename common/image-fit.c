@@ -30,6 +30,9 @@ DECLARE_GLOBAL_DATA_PTR;
 #include <u-boot/sha1.h>
 #include <u-boot/sha256.h>
 
+#define __round_mask(x, y) ((__typeof__(x))((y)-1))
+#define round_up(x, y) ((((x)-1) | __round_mask(x, y))+1)
+
 /*****************************************************************************/
 /* New uImage format routines */
 /*****************************************************************************/
@@ -711,6 +714,34 @@ static int fit_image_get_address(const void *fit, int noffset, char *name,
 
 	return 0;
 }
+
+static int fit_image_set_address(const void *fit, int noffset, char *name,
+				 ulong addr)
+{
+	int len, cell_len;
+	const fdt32_t *cell;
+
+	cell = fdt_getprop(fit, noffset, name, &len);
+	if (cell == NULL) {
+		fit_get_debug(fit, noffset, name, len);
+		return -1;
+	}
+
+	if (len > sizeof(ulong)) {
+		printf("Unsupported %s address size\n", name);
+		return -1;
+	}
+
+	cell_len = len >> 2;
+	/* Use load64 to avoid compiling warning for 32-bit target */
+	while (cell_len--) {
+		*(fdt32_t *)cell = cpu_to_uimage(addr >> (32 * cell_len));
+		cell++;
+	}
+
+	return 0;
+}
+
 /**
  * fit_image_get_load() - get load addr property for given component image node
  * @fit: pointer to the FIT format image header
@@ -727,6 +758,24 @@ static int fit_image_get_address(const void *fit, int noffset, char *name,
 int fit_image_get_load(const void *fit, int noffset, ulong *load)
 {
 	return fit_image_get_address(fit, noffset, FIT_LOAD_PROP, load);
+}
+
+/**
+ * fit_image_set_load() - set load addr property for given component image node
+ * @fit: pointer to the FIT format image header
+ * @noffset: component image node offset
+ * @load: uint32_t value, will hold load address
+ *
+ * fit_image_set_load() finds and set load address property in a given component
+ * image node. If the property is found, its value is returned to the caller.
+ *
+ * returns:
+ *     0, on success
+ *     -1, on failure
+ */
+int fit_image_set_load(const void *fit, int noffset, ulong load)
+{
+	return fit_image_set_address(fit, noffset, FIT_LOAD_PROP, load);
 }
 
 /**
@@ -752,6 +801,28 @@ int fit_image_get_entry(const void *fit, int noffset, ulong *entry)
 }
 
 /**
+ * fit_image_set_entry() - set entry point address property
+ * @fit: pointer to the FIT format image header
+ * @noffset: component image node offset
+ * @entry: uint32_t value, will hold entry point address
+ *
+ * This sets the entry point address property for a given component image
+ * node.
+ *
+ * fit_image_set_entry() finds and set entry point address property in a given
+ * component image node.  If the property is found, its value is returned
+ * to the caller.
+ *
+ * returns:
+ *     0, on success
+ *     -1, on failure
+ */
+int fit_image_set_entry(const void *fit, int noffset, ulong entry)
+{
+	return fit_image_set_address(fit, noffset, FIT_ENTRY_PROP, entry);
+}
+
+/**
  * fit_image_get_data - get data property and its size for a given component image node
  * @fit: pointer to the FIT format image header
  * @noffset: component image node offset
@@ -769,13 +840,25 @@ int fit_image_get_entry(const void *fit, int noffset, ulong *entry)
 int fit_image_get_data(const void *fit, int noffset,
 		const void **data, size_t *size)
 {
+	ulong data_off = 0;
+	int data_sz = 0;
 	int len;
 
 	*data = fdt_getprop(fit, noffset, FIT_DATA_PROP, &len);
 	if (*data == NULL) {
-		fit_get_debug(fit, noffset, FIT_DATA_PROP, len);
-		*size = 0;
-		return -1;
+		fit_image_get_data_offset(fit, noffset, (int *)&data_off);
+		fit_image_get_data_size(fit, noffset, &data_sz);
+		if (data_sz) {
+			data_off += (ulong)fit;
+			data_off += round_up(fdt_totalsize(fit), 4);
+			*data = (void *)data_off;
+			*size = data_sz;
+			return 0;
+		} else {
+			fit_get_debug(fit, noffset, FIT_DATA_PROP, len);
+			*size = 0;
+			return -1;
+		}
 	}
 
 	*size = len;
@@ -802,6 +885,31 @@ int fit_image_get_data_offset(const void *fit, int noffset, int *data_offset)
 		return -ENOENT;
 
 	*data_offset = fdt32_to_cpu(*val);
+
+	return 0;
+}
+
+/**
+ * Get 'data-position' property from a given image node.
+ *
+ * @fit: pointer to the FIT image header
+ * @noffset: component image node offset
+ * @data_position: holds the data-position property
+ *
+ * returns:
+ *     0, on success
+ *     -ENOENT if the property could not be found
+ */
+int fit_image_get_data_position(const void *fit, int noffset,
+				int *data_position)
+{
+	const fdt32_t *val;
+
+	val = fdt_getprop(fit, noffset, FIT_DATA_POSITION_PROP, NULL);
+	if (!val)
+		return -ENOENT;
+
+	*data_position = fdt32_to_cpu(*val);
 
 	return 0;
 }
@@ -1043,33 +1151,13 @@ static int fit_image_check_hash(const void *fit, int noffset, const void *data,
 	return 0;
 }
 
-/**
- * fit_image_verify - verify data integrity
- * @fit: pointer to the FIT format image header
- * @image_noffset: component image node offset
- *
- * fit_image_verify() goes over component image hash nodes,
- * re-calculates each data hash and compares with the value stored in hash
- * node.
- *
- * returns:
- *     1, if all hashes are valid
- *     0, otherwise (or on error)
- */
-int fit_image_verify(const void *fit, int image_noffset)
+int fit_image_verify_with_data(const void *fit, int image_noffset,
+			       const void *data, size_t size)
 {
-	const void	*data;
-	size_t		size;
 	int		noffset = 0;
 	char		*err_msg = "";
 	int verify_all = 1;
 	int ret;
-
-	/* Get image data and data length */
-	if (fit_image_get_data(fit, image_noffset, &data, &size)) {
-		err_msg = "Can't get image data/size";
-		goto error;
-	}
 
 	/* Verify all required signatures */
 	if (IMAGE_ENABLE_VERIFY &&
@@ -1125,6 +1213,38 @@ error:
 	       err_msg, fit_get_name(fit, noffset, NULL),
 	       fit_get_name(fit, image_noffset, NULL));
 	return 0;
+}
+
+/**
+ * fit_image_verify - verify data integrity
+ * @fit: pointer to the FIT format image header
+ * @image_noffset: component image node offset
+ *
+ * fit_image_verify() goes over component image hash nodes,
+ * re-calculates each data hash and compares with the value stored in hash
+ * node.
+ *
+ * returns:
+ *     1, if all hashes are valid
+ *     0, otherwise (or on error)
+ */
+int fit_image_verify(const void *fit, int image_noffset)
+{
+	const void	*data;
+	size_t		size;
+	int		noffset = 0;
+	char		*err_msg = "";
+
+	/* Get image data and data length */
+	if (fit_image_get_data(fit, image_noffset, &data, &size)) {
+		err_msg = "Can't get image data/size";
+		printf("error!\n%s for '%s' hash node in '%s' image node\n",
+		       err_msg, fit_get_name(fit, noffset, NULL),
+		       fit_get_name(fit, image_noffset, NULL));
+		return 0;
+	}
+
+	return fit_image_verify_with_data(fit, image_noffset, data, size);
 }
 
 /**
@@ -1572,6 +1692,10 @@ void fit_conf_print(const void *fit, int noffset, const char *p)
 	uname = fdt_getprop(fit, noffset, FIT_RAMDISK_PROP, NULL);
 	if (uname)
 		printf("%s  Init Ramdisk: %s\n", p, uname);
+
+	uname = fdt_getprop(fit, noffset, FIT_FIRMWARE_PROP, NULL);
+	if (uname)
+		printf("%s  Firmware:     %s\n", p, uname);
 
 	for (fdt_index = 0;
 	     uname = fdt_stringlist_get(fit, noffset, FIT_FDT_PROP,

@@ -895,6 +895,7 @@ int bootz_setup(ulong image, ulong *start, ulong *end);
 
 /* image node */
 #define FIT_DATA_PROP		"data"
+#define FIT_DATA_POSITION_PROP	"data-position"
 #define FIT_DATA_OFFSET_PROP	"data-offset"
 #define FIT_DATA_SIZE_PROP	"data-size"
 #define FIT_TIMESTAMP_PROP	"timestamp"
@@ -910,10 +911,12 @@ int bootz_setup(ulong image, ulong *start, ulong *end);
 #define FIT_KERNEL_PROP		"kernel"
 #define FIT_RAMDISK_PROP	"ramdisk"
 #define FIT_FDT_PROP		"fdt"
+#define FIT_MULTI_PROP		"multi"
 #define FIT_LOADABLE_PROP	"loadables"
 #define FIT_DEFAULT_PROP	"default"
 #define FIT_SETUP_PROP		"setup"
 #define FIT_FPGA_PROP		"fpga"
+#define FIT_FIRMWARE_PROP	"firmware"
 
 #define FIT_MAX_HASH_LEN	HASH_MAX_DIGEST_SIZE
 
@@ -973,9 +976,13 @@ int fit_image_get_type(const void *fit, int noffset, uint8_t *type);
 int fit_image_get_comp(const void *fit, int noffset, uint8_t *comp);
 int fit_image_get_load(const void *fit, int noffset, ulong *load);
 int fit_image_get_entry(const void *fit, int noffset, ulong *entry);
+int fit_image_set_load(const void *fit, int noffset, ulong load);
+int fit_image_set_entry(const void *fit, int noffset, ulong entry);
 int fit_image_get_data(const void *fit, int noffset,
 				const void **data, size_t *size);
 int fit_image_get_data_offset(const void *fit, int noffset, int *data_offset);
+int fit_image_get_data_position(const void *fit, int noffset,
+				int *data_position);
 int fit_image_get_data_size(const void *fit, int noffset, int *data_size);
 
 int fit_image_hash_get_algo(const void *fit, int noffset, char **algo);
@@ -1008,6 +1015,8 @@ int fit_add_verification_data(const char *keydir, void *keydest, void *fit,
 			      const char *comment, int require_keys,
 			      const char *engine_id);
 
+int fit_image_verify_with_data(const void *fit, int image_noffset,
+			       const void *data, size_t size);
 int fit_image_verify(const void *fit, int noffset);
 int fit_config_verify(const void *fit, int conf_noffset);
 int fit_all_image_verify(const void *fit);
@@ -1262,6 +1271,8 @@ static inline int fit_image_check_target_arch(const void *fdt, int node)
 
 #if defined(CONFIG_ANDROID_BOOT_IMAGE)
 struct andr_img_hdr;
+u32 android_bcb_msg_sector_offset(void);
+u32 android_image_major_version(void);
 int android_image_check_header(const struct andr_img_hdr *hdr);
 int android_image_get_kernel(const struct andr_img_hdr *hdr, int verify,
 			     ulong *os_data, ulong *os_len);
@@ -1274,19 +1285,9 @@ ulong android_image_get_end(const struct andr_img_hdr *hdr);
 ulong android_image_get_kload(const struct andr_img_hdr *hdr);
 void android_print_contents(const struct andr_img_hdr *hdr);
 
-/** android_image_load_separate - Load an Android Image separate from storage or ram
- *
- * Load an Android Image based on the header size in the storage or ram.
- *
- * @hdr:		The android image header
- * @part:		The partition where to read the image from
- * @load_address:	The address where the image will be loaded
- * @ram_src:		The ram source to load, if NULL load from partition
- * @return the blk count.
- */
-int android_image_load_separate(struct andr_img_hdr *hdr,
-				const disk_partition_t *part,
-				void *load_address, void *ram_src);
+void android_image_set_decomp(struct andr_img_hdr *hdr, int comp);
+int android_image_parse_comp(struct andr_img_hdr *hdr, ulong *load_addr);
+int android_image_memcpy_separate(struct andr_img_hdr *hdr, ulong *load_address);
 
 /** android_image_load - Load an Android Image from storage.
  *
@@ -1308,6 +1309,9 @@ long android_image_load(struct blk_desc *dev_desc,
 			unsigned long load_address,
 			unsigned long max_size);
 
+int android_image_load_by_partname(struct blk_desc *dev_desc,
+				   const char *boot_partname,
+				   unsigned long *load_address);
 #endif /* CONFIG_ANDROID_BOOT_IMAGE */
 
 int bootm_parse_comp(const unsigned char *hdr);

@@ -34,11 +34,6 @@ static int spl_node_to_boot_device(int node)
 {
 	struct udevice *parent;
 
-#ifdef CONFIG_SPL_NAND_SUPPORT
-	if (!rk_nand_init())
-		return BOOT_DEVICE_NAND;
-#endif
-
 	/*
 	 * This should eventually move into the SPL code, once SPL becomes
 	 * aware of the block-device layer.  Until then (and to avoid unneeded
@@ -77,7 +72,18 @@ static int spl_node_to_boot_device(int node)
 	 * soon.
 	 */
 	if (!uclass_get_device_by_of_offset(UCLASS_SPI_FLASH, node, &parent))
+#ifndef CONFIG_SPL_MTD_SUPPORT
 		return BOOT_DEVICE_SPI;
+#else
+		return BOOT_DEVICE_MTD_BLK_SPI_NOR;
+	if (!uclass_get_device_by_of_offset(UCLASS_MTD, node, &parent))
+		return BOOT_DEVICE_MTD_BLK_SPI_NAND;
+#endif
+
+#ifdef CONFIG_SPL_NAND_SUPPORT
+	if (!rk_nand_init())
+		return BOOT_DEVICE_NAND;
+#endif
 
 	return -1;
 }

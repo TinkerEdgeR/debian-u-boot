@@ -125,7 +125,7 @@
 # define dump_msg(fsg, label, buf, length) do {                         \
 	if (length < 512) {						\
 		DBG(fsg, "%s, length %u:\n", label, length);		\
-		print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET,	\
+		print_hex_dump("", DUMP_PREFIX_OFFSET,	\
 			       16, 1, buf, length, 0);			\
 	}								\
 } while (0)
@@ -140,7 +140,7 @@
 #  ifdef VERBOSE_DEBUG
 
 #    define dump_cdb(fsg)						\
-	print_hex_dump(KERN_DEBUG, "SCSI CDB: ", DUMP_PREFIX_NONE,	\
+	print_hex_dump("SCSI CDB: ", DUMP_PREFIX_NONE,	\
 		       16, 1, (fsg)->cmnd, (fsg)->cmnd_size, 0)		\
 
 #  else
@@ -309,7 +309,7 @@ static struct fsg_lun *fsg_lun_from_dev(struct device *dev)
 #define FSG_NUM_BUFFERS	2
 
 /* Default size of buffer length. */
-#define FSG_BUFLEN	((u32)131072)
+#define FSG_BUFLEN	((u32)262144)
 
 /* Maximal number of LUNs supported in mass storage function */
 #define FSG_MAX_LUNS	8

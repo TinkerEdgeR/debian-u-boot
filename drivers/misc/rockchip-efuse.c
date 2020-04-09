@@ -12,9 +12,11 @@
 #include <command.h>
 #include <display_options.h>
 #include <dm.h>
+#include <linux/arm-smccc.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <misc.h>
+#include <asm/arch/rockchip_smccc.h>
 
 #define T_CSB_P_S		0
 #define T_PGENB_P_S		0
@@ -104,47 +106,6 @@ struct rockchip_efuse_platdata {
 	void __iomem *base;
 	struct clk *clk;
 };
-
-#if defined(DEBUG)
-static int dump_efuses(cmd_tbl_t *cmdtp, int flag,
-		       int argc, char * const argv[])
-{
-	/*
-	 * N.B.: This function is tailored towards the RK3399 and assumes that
-	 *       there's always 32 fuses x 32 bits (i.e. 128 bytes of data) to
-	 *       be read.
-	 */
-
-	struct udevice *dev;
-	u8 fuses[128] = {0};
-	int ret;
-
-	/* retrieve the device */
-	ret = uclass_get_device_by_driver(UCLASS_MISC,
-					  DM_GET_DRIVER(rockchip_efuse), &dev);
-	if (ret) {
-		printf("%s: no misc-device found\n", __func__);
-		return 0;
-	}
-
-	ret = misc_read(dev, 0, &fuses, sizeof(fuses));
-	if (ret) {
-		printf("%s: misc_read failed\n", __func__);
-		return 0;
-	}
-
-	printf("efuse-contents:\n");
-	print_buffer(0, fuses, 1, 128, 16);
-
-	return 0;
-}
-
-U_BOOT_CMD(
-	rockchip_dump_efuses, 1, 1, dump_efuses,
-	"Dump the content of the efuses",
-	""
-);
-#endif
 
 static void rk1808_efuse_timing_init(void __iomem *base)
 {
@@ -303,6 +264,57 @@ static int rockchip_rk3288_efuse_read(struct udevice *dev, int offset,
 	return 0;
 }
 
+#ifndef CONFIG_SPL_BUILD
+static int rockchip_rk3288_efuse_secure_read(struct udevice *dev, int offset,
+					     void *buf, int size)
+{
+	struct rockchip_efuse_platdata *plat = dev_get_platdata(dev);
+	struct rockchip_efuse_regs *efuse =
+		(struct rockchip_efuse_regs *)plat->base;
+	u8 *buffer = buf;
+	int max_size = RK3288_NFUSES * RK3288_BYTES_PER_FUSE;
+	struct arm_smccc_res res;
+
+	if (size > (max_size - offset))
+		size = max_size - offset;
+
+	/* Switch to read mode */
+	sip_smc_secure_reg_write((ulong)&efuse->ctrl,
+				 RK3288_LOAD | RK3288_PGENB);
+	udelay(1);
+	while (size--) {
+		res = sip_smc_secure_reg_read((ulong)&efuse->ctrl);
+		sip_smc_secure_reg_write((ulong)&efuse->ctrl, res.a1 &
+					 (~(RK3288_A_MASK << RK3288_A_SHIFT)));
+		/* set addr */
+		res = sip_smc_secure_reg_read((ulong)&efuse->ctrl);
+		sip_smc_secure_reg_write((ulong)&efuse->ctrl, res.a1 |
+					 ((offset++ & RK3288_A_MASK) <<
+					  RK3288_A_SHIFT));
+		udelay(1);
+		/* strobe low to high */
+		res = sip_smc_secure_reg_read((ulong)&efuse->ctrl);
+		sip_smc_secure_reg_write((ulong)&efuse->ctrl,
+					 res.a1 | RK3288_STROBE);
+		ndelay(60);
+		/* read data */
+		res = sip_smc_secure_reg_read((ulong)&efuse->dout);
+		*buffer++ = res.a1;
+		/* reset strobe to low */
+		res = sip_smc_secure_reg_read((ulong)&efuse->ctrl);
+		sip_smc_secure_reg_write((ulong)&efuse->ctrl,
+					 res.a1 & (~RK3288_STROBE));
+		udelay(1);
+	}
+
+	/* Switch to standby mode */
+	sip_smc_secure_reg_write((ulong)&efuse->ctrl,
+				 RK3288_PGENB | RK3288_CSB);
+
+	return 0;
+}
+#endif
+
 static int rockchip_rk3328_efuse_read(struct udevice *dev, int offset,
 				      void *buf, int size)
 {
@@ -383,10 +395,12 @@ static const struct udevice_id rockchip_efuse_ids[] = {
 		.compatible = "rockchip,rk1808-efuse",
 		.data = (ulong)&rockchip_rk1808_efuse_read,
 	},
+#ifndef CONFIG_SPL_BUILD
 	{
-		.compatible = "rockchip,rockchip-efuse",
-		.data = (ulong)&rockchip_rk3288_efuse_read,
+		.compatible = "rockchip,rk3288-secure-efuse",
+		.data = (ulong)&rockchip_rk3288_efuse_secure_read,
 	},
+#endif
 	{
 		.compatible = "rockchip,rk3066a-efuse",
 		.data = (ulong)&rockchip_rk3288_efuse_read,

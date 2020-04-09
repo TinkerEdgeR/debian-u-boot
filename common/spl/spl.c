@@ -77,6 +77,11 @@ int __weak bootz_setup(ulong image, ulong *start, ulong *end)
 }
 #endif
 
+/* Weak default function for arch/board-specific fixups to the spl_image_info */
+void __weak spl_perform_fixups(struct spl_image_info *spl_image)
+{
+}
+
 void spl_fixup_fdt(void)
 {
 #if defined(CONFIG_SPL_OF_LIBFDT) && defined(CONFIG_SYS_SPL_ARGS_ADDR)
@@ -231,6 +236,21 @@ static int spl_common_init(bool setup_malloc)
 		gd->malloc_ptr = 0;
 	}
 #endif
+
+	/*
+	 * setup D-cache as early as possible after malloc setup
+	 * I-cache has been setup at early assembly code by default.
+	 */
+#if !defined(CONFIG_TPL_BUILD)
+	/* tlb memory should be 64KB align for base and 4KB align for end */
+	gd->arch.tlb_size = PGTABLE_SIZE;
+	gd->arch.tlb_addr = (ulong)memalign(SZ_64K, ALIGN(PGTABLE_SIZE, SZ_4K));
+	if (gd->arch.tlb_addr)
+		dcache_enable();
+	else
+		debug("spl: no tlb memory\n");
+#endif
+
 	ret = bootstage_init(true);
 	if (ret) {
 		debug("%s: Failed to set up bootstage: ret=%d\n", __func__,
@@ -377,8 +397,10 @@ static int boot_from_devices(struct spl_image_info *spl_image,
 		else
 			puts("SPL: Unsupported Boot Device!\n");
 #endif
-		if (loader && !spl_load_image(spl_image, loader))
+		if (loader && !spl_load_image(spl_image, loader)) {
+			spl_image->boot_device = spl_boot_list[i];
 			return 0;
+		}
 	}
 
 	return -ENODEV;
@@ -468,6 +490,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 #ifdef CONFIG_SYS_SPL_ARGS_ADDR
 	spl_image.arg = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
 #endif
+	spl_image.boot_device = BOOT_DEVICE_NONE;
 	board_boot_order(spl_boot_list);
 
 	if (boot_from_devices(&spl_image, spl_boot_list,
@@ -475,6 +498,8 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 		puts("SPL: failed to boot from all boot devices\n");
 		hang();
 	}
+
+	spl_perform_fixups(&spl_image);
 
 #ifdef CONFIG_CPU_V7M
 	spl_image.entry_point |= 0x1;

@@ -16,7 +16,7 @@
 #endif
 
 #define CONFIG_SKIP_LOWLEVEL_INIT_ONLY
-#define CONFIG_SYS_MALLOC_LEN		(192 << 20)
+#define CONFIG_SYS_MALLOC_LEN		(32 << 20)
 #define CONFIG_SYS_CBSIZE		1024
 
 #define CONFIG_SPL_FRAMEWORK
@@ -25,7 +25,7 @@
 #define CONFIG_SYS_LOAD_ADDR		0x00800800
 #define CONFIG_SPL_STACK		0x00180000
 #define CONFIG_SPL_TEXT_BASE		0x00000000
-#define CONFIG_SPL_MAX_SIZE		0x100000
+#define CONFIG_SPL_MAX_SIZE		0x40000
 
 #define CONFIG_SYS_BOOTM_LEN		(64 << 20)	/*  64M */
 #define GICD_BASE			0xffc01000
@@ -49,10 +49,6 @@
 #define SDRAM_BANK_SIZE			(2UL << 30)
 #define SDRAM_MAX_SIZE			0xfe000000
 
-#define CONFIG_SPI_FLASH
-#define CONFIG_SPI
-#define CONFIG_SF_DEFAULT_SPEED 20000000
-
 #ifndef CONFIG_SPL_BUILD
 /* usb otg */
 #define CONFIG_ROCKCHIP_USB2_PHY
@@ -71,11 +67,7 @@
 
 #include <config_distro_bootcmd.h>
 
-/* Linux fails to load the fdt if it's loaded above 256M on a Rock 2 board, so
- * limit the fdt reallocation to that */
 #define CONFIG_EXTRA_ENV_SETTINGS \
-	"fdt_high=0x0fffffff\0" \
-	"initrd_high=0x0fffffff\0" \
 	"partitions=" PARTS_DEFAULT \
 	ENV_MEM_LAYOUT_SETTINGS \
 	ROCKCHIP_DEVICE_SETTINGS \

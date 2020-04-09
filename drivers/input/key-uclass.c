@@ -263,7 +263,8 @@ static int key_post_probe(struct udevice *dev)
 		return -ENXIO;
 
 	/* True from U-Boot key node */
-	uc_key->pre_reloc = dev_read_bool(dev, "u-boot,dm-pre-reloc");
+	uc_key->pre_reloc = dev_read_bool(dev, "u-boot,dm-pre-reloc") ||
+			    dev_read_bool(dev, "u-boot,dm-spl");
 
 	if (uc_key->type == ADC_KEY) {
 		uc_key->max = uc_key->adcval + margin;
@@ -273,6 +274,9 @@ static int key_post_probe(struct udevice *dev)
 		if (uc_key->code == KEY_POWER) {
 #ifdef CONFIG_IRQ
 			int irq;
+
+			if (uc_key->skip_irq_init)
+				return 0;
 
 			irq = phandle_gpio_to_irq(uc_key->gpios[0],
 						  uc_key->gpios[1]);

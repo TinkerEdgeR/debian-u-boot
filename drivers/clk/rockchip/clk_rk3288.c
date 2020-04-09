@@ -152,6 +152,28 @@ enum {
 	PCLK_ALIVE_DIV_CON_SHIFT	= 8,
 	PCLK_ALIVE_DIV_CON_MASK		= 0x1f << PCLK_ALIVE_DIV_CON_SHIFT,
 
+	/* CLKSEL39 */
+	ACLK_HEVC_SEL_PLL_SHIFT		= 14,
+	ACLK_HEVC_SEL_PLL_MASK		= 0x3 << ACLK_HEVC_SEL_PLL_SHIFT,
+	ACLK_HEVC_SEL_CPLL		= 0,
+	ACLK_HEVC_SEL_GPLL,
+	ACLK_HEVC_DIV_CON_SHIFT		= 8,
+	ACLK_HEVC_DIV_CON_MASK		= 0x1f << ACLK_HEVC_DIV_CON_SHIFT,
+
+	/* CLKSEL42 */
+	CLK_HEVC_CORE_SEL_PLL_SHIFT	= 14,
+	CLK_HEVC_CORE_SEL_PLL_MASK	= 0x3 << CLK_HEVC_CORE_SEL_PLL_SHIFT,
+	CLK_HEVC_CORE_SEL_CPLL		= 0,
+	CLK_HEVC_CORE_SEL_GPLL,
+	CLK_HEVC_CORE_DIV_CON_SHIFT	= 8,
+	CLK_HEVC_CORE_DIV_CON_MASK	= 0x1f << CLK_HEVC_CORE_DIV_CON_SHIFT,
+	CLK_HEVC_CABAC_SEL_PLL_SHIFT	= 6,
+	CLK_HEVC_CABAC_SEL_PLL_MASK	= 0x3 << CLK_HEVC_CABAC_SEL_PLL_SHIFT,
+	CLK_HEVC_CABAC_SEL_CPLL		= 0,
+	CLK_HEVC_CABAC_SEL_GPLL,
+	CLK_HEVC_CABAC_DIV_CON_SHIFT	= 0,
+	CLK_HEVC_CABAC_DIV_CON_MASK	= 0x1f << CLK_HEVC_CABAC_DIV_CON_SHIFT,
+
 	SOCSTS_DPLL_LOCK	= 1 << 5,
 	SOCSTS_APLL_LOCK	= 1 << 6,
 	SOCSTS_CPLL_LOCK	= 1 << 7,
@@ -183,9 +205,6 @@ static int rkclk_set_pll(struct rk3288_cru *cru, enum rk_clk_id clk_id,
 
 	debug("PLL at %x: nf=%d, nr=%d, no=%d, vco=%u Hz, output=%u Hz\n",
 	      (uint)pll, div->nf, div->nr, div->no, vco_hz, output_hz);
-	assert(vco_hz >= VCO_MIN_HZ && vco_hz <= VCO_MAX_HZ &&
-	       output_hz >= OUTPUT_MIN_HZ && output_hz <= OUTPUT_MAX_HZ &&
-	       (div->no == 1 || !(div->no % 2)));
 
 	/* enter reset */
 	rk_setreg(&pll->con3, 1 << PLL_RESET_SHIFT);
@@ -583,6 +602,18 @@ static void rkclk_init(struct rk3288_cru *cru, struct rk3288_grf *grf)
 		     pclk_div << PERI_PCLK_DIV_SHIFT |
 		     hclk_div << PERI_HCLK_DIV_SHIFT |
 		     aclk_div << PERI_ACLK_DIV_SHIFT);
+
+	rk_clrsetreg(&cru->cru_clksel_con[39],
+		     ACLK_HEVC_SEL_PLL_MASK | ACLK_HEVC_DIV_CON_MASK,
+		     ACLK_HEVC_SEL_CPLL << ACLK_HEVC_SEL_PLL_SHIFT |
+		     4 << ACLK_HEVC_DIV_CON_SHIFT);
+	rk_clrsetreg(&cru->cru_clksel_con[42],
+		     CLK_HEVC_CORE_SEL_PLL_MASK | CLK_HEVC_CORE_DIV_CON_MASK |
+		     CLK_HEVC_CORE_SEL_PLL_MASK | CLK_HEVC_CORE_DIV_CON_MASK,
+		     CLK_HEVC_CORE_SEL_CPLL << CLK_HEVC_CORE_SEL_PLL_SHIFT |
+		     CLK_HEVC_CABAC_SEL_CPLL << CLK_HEVC_CABAC_DIV_CON_SHIFT |
+		     4 << CLK_HEVC_CORE_DIV_CON_SHIFT |
+		     4 << CLK_HEVC_CABAC_DIV_CON_SHIFT);
 
 	/* PLL enter normal-mode */
 	rk_clrsetreg(&cru->cru_mode_con,

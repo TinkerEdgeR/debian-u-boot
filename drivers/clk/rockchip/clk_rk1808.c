@@ -265,6 +265,32 @@ static ulong rk1808_mmc_set_clk(struct rk1808_clk_priv *priv,
 	return rk1808_mmc_get_clk(priv, clk_id);
 }
 
+static ulong rk1808_sfc_get_clk(struct rk1808_clk_priv *priv, uint clk_id)
+{
+	struct rk1808_cru *cru = priv->cru;
+	u32 div, con;
+
+	con = readl(&cru->clksel_con[26]);
+	div = (con & SFC_DIV_CON_MASK) >> SFC_DIV_CON_SHIFT;
+
+	return DIV_TO_RATE(priv->gpll_hz, div);
+}
+
+static ulong rk1808_sfc_set_clk(struct rk1808_clk_priv *priv,
+				ulong clk_id, ulong set_rate)
+{
+	struct rk1808_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(priv->gpll_hz, set_rate);
+	rk_clrsetreg(&cru->clksel_con[26],
+		     SFC_PLL_SEL_MASK | SFC_DIV_CON_MASK,
+		     0 << SFC_PLL_SEL_SHIFT |
+		     (src_clk_div - 1) << SFC_DIV_CON_SHIFT);
+
+	return rk1808_sfc_get_clk(priv, clk_id);
+}
+
 #ifndef CONFIG_SPL_BUILD
 static ulong rk1808_pwm_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
 {
@@ -625,6 +651,63 @@ static int rk1808_mac_set_speed_clk(struct clk *clk, ulong clk_id, uint hz)
 	}
 	return 0;
 }
+
+static ulong rk1808_crypto_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
+{
+	struct rk1808_cru *cru = priv->cru;
+	u32 div, con, parent;
+
+	switch (clk_id) {
+	case SCLK_CRYPTO:
+		con = readl(&cru->clksel_con[29]);
+		div = (con & CRYPTO_DIV_MASK) >> CRYPTO_DIV_SHIFT;
+		parent = priv->gpll_hz;
+		break;
+	case SCLK_CRYPTO_APK:
+		con = readl(&cru->clksel_con[29]);
+		div = (con & CRYPTO_APK_DIV_MASK) >> CRYPTO_APK_DIV_SHIFT;
+		parent = priv->gpll_hz;
+		break;
+	default:
+		return -ENOENT;
+	}
+
+	return DIV_TO_RATE(parent, div);
+}
+
+static ulong rk1808_crypto_set_clk(struct rk1808_clk_priv *priv, ulong clk_id,
+				   ulong hz)
+{
+	struct rk1808_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(priv->gpll_hz, hz);
+	assert(src_clk_div - 1 <= 31);
+
+	/*
+	 * select gpll as crypto clock source and
+	 * set up dependent divisors for crypto clocks.
+	 */
+	switch (clk_id) {
+	case SCLK_CRYPTO:
+		rk_clrsetreg(&cru->clksel_con[29],
+			     CRYPTO_PLL_SEL_MASK | CRYPTO_DIV_MASK,
+			     CRYPTO_PLL_SEL_GPLL << CRYPTO_PLL_SEL_SHIFT |
+			     (src_clk_div - 1) << CRYPTO_DIV_SHIFT);
+		break;
+	case SCLK_CRYPTO_APK:
+		rk_clrsetreg(&cru->clksel_con[29],
+			     CRYPTO_APK_PLL_SEL_MASK | CRYPTO_APK_DIV_MASK,
+			     CRYPTO_PLL_SEL_GPLL << CRYPTO_APK_SEL_SHIFT |
+			     (src_clk_div - 1) << CRYPTO_APK_DIV_SHIFT);
+		break;
+	default:
+		printf("do not support this peri freq\n");
+		return -EINVAL;
+	}
+
+	return rk1808_crypto_get_clk(priv, clk_id);
+}
 #endif
 
 static ulong rk1808_bus_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
@@ -849,6 +932,9 @@ static ulong rk1808_clk_get_rate(struct clk *clk)
 	case SCLK_SDIO:
 		rate = rk1808_mmc_get_clk(priv, clk->id);
 		break;
+	case SCLK_SFC:
+		rate = rk1808_sfc_get_clk(priv, clk->id);
+		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_PMU_I2C0:
 	case SCLK_I2C1:
@@ -879,6 +965,10 @@ static ulong rk1808_clk_get_rate(struct clk *clk)
 	case ACLK_VOPLITE:
 	case DCLK_VOPLITE:
 		rate = rk1808_vop_get_clk(priv, clk->id);
+		break;
+	case SCLK_CRYPTO:
+	case SCLK_CRYPTO_APK:
+		rate = rk1808_crypto_get_clk(priv, clk->id);
 		break;
 #endif
 	case HSCLK_BUS_PRE:
@@ -946,6 +1036,9 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_SDIO:
 		ret = rk1808_mmc_set_clk(priv, clk->id, rate);
 		break;
+	case SCLK_SFC:
+		ret = rk1808_sfc_set_clk(priv, clk->id, rate);
+		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_PMU_I2C0:
 	case SCLK_I2C1:
@@ -984,6 +1077,10 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_GMAC_RMII_SPEED:
 	case SCLK_GMAC_RGMII_SPEED:
 		ret = rk1808_mac_set_speed_clk(clk, clk->id, rate);
+		break;
+	case SCLK_CRYPTO:
+	case SCLK_CRYPTO_APK:
+		ret = rk1808_crypto_set_clk(priv, clk->id, rate);
 		break;
 #endif
 	case HSCLK_BUS_PRE:
@@ -1178,6 +1275,10 @@ static int rk1808_clk_probe(struct udevice *dev)
 {
 	struct rk1808_clk_priv *priv = dev_get_priv(dev);
 	int ret;
+#ifndef CONFIG_SPL_BUILD
+	ulong crypto_rate, crypto_apk_rate;
+	ulong emmc_rate, sdmmc_rate, sfc_rate;
+#endif
 
 	priv->sync_kernel = false;
 	if (!priv->armclk_enter_hz) {
@@ -1193,7 +1294,17 @@ static int rk1808_clk_probe(struct udevice *dev)
 			printf("%s failed to set armclk rate\n", __func__);
 		priv->armclk_init_hz = APLL_HZ;
 	}
-
+#ifdef CONFIG_SPL_BUILD
+	/*
+	 * The eMMC clk is depended on gpll, and the eMMC is needed to
+	 * run 150MHz in HS200 mode. So set gpll to GPLL_HZ(594000000)
+	 * which can be divided near to 150MHz.
+	 */
+	ret = rockchip_pll_set_rate(&rk1808_pll_clks[GPLL],
+				    priv->cru, GPLL, GPLL_HZ);
+	if (ret < 0)
+		printf("%s failed to set gpll rate\n", __func__);
+#endif
 	priv->cpll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[CPLL],
 					      priv->cru, CPLL);
 	priv->gpll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[GPLL],
@@ -1201,12 +1312,28 @@ static int rk1808_clk_probe(struct udevice *dev)
 	priv->npll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[NPLL],
 					      priv->cru, NPLL);
 
+#ifndef CONFIG_SPL_BUILD
+	crypto_rate = rk1808_crypto_get_clk(priv, SCLK_CRYPTO);
+	crypto_apk_rate = rk1808_crypto_get_clk(priv, SCLK_CRYPTO_APK);
+	emmc_rate = rk1808_mmc_get_clk(priv, SCLK_EMMC);
+	sdmmc_rate = rk1808_mmc_get_clk(priv, SCLK_SDMMC);
+	sfc_rate = rk1808_sfc_get_clk(priv, SCLK_SFC);
+#endif
+
 	/* Process 'assigned-{clocks/clock-parents/clock-rates}' properties */
 	ret = clk_set_defaults(dev);
 	if (ret)
 		debug("%s clk_set_defaults failed %d\n", __func__, ret);
 	else
 		priv->sync_kernel = true;
+
+#ifndef CONFIG_SPL_BUILD
+	rk1808_crypto_set_clk(priv, SCLK_CRYPTO, crypto_rate);
+	rk1808_crypto_set_clk(priv, SCLK_CRYPTO_APK, crypto_apk_rate);
+	rk1808_mmc_set_clk(priv, SCLK_EMMC, emmc_rate);
+	rk1808_mmc_set_clk(priv, SCLK_SDMMC, sdmmc_rate);
+	rk1808_sfc_set_clk(priv, SCLK_SFC, sfc_rate);
+#endif
 
 	return 0;
 }

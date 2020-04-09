@@ -3,10 +3,7 @@
  * Copyright (c) 2019 Fuzhou Rockchip Electronics Co., Ltd
  */
 
-#include <common.h>
 #include <crypto.h>
-#include <dm.h>
-#include <u-boot/sha1.h>
 
 u32 crypto_algo_nbits(u32 algo)
 {
@@ -17,6 +14,8 @@ u32 crypto_algo_nbits(u32 algo)
 		return 160;
 	case CRYPTO_SHA256:
 		return 256;
+	case CRYPTO_SHA512:
+		return 512;
 	case CRYPTO_RSA512:
 		return 512;
 	case CRYPTO_RSA1024:
@@ -117,6 +116,16 @@ int crypto_rsa_verify(struct udevice *dev, rsa_key *ctx, u8 *sign, u8 *output)
 		return -ENOSYS;
 
 	return ops->rsa_verify(dev, ctx, sign, output);
+}
+
+int crypto_get_trng(struct udevice *dev, u8 *output, u32 len)
+{
+	const struct dm_crypto_ops *ops = device_get_ops(dev);
+
+	if (!ops || !ops->get_trng)
+		return -ENOSYS;
+
+	return ops->get_trng(dev, output, len);
 }
 
 UCLASS_DRIVER(crypto) = {

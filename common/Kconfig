@@ -255,6 +255,11 @@ config CONSOLE_DISABLE_CTRLC
 	help
 	  This disable ctrl+c when CONFIG_BOOTDELAY is 0.
 
+config DISABLE_CONSOLE
+	bool "disable console in & out"
+	help
+	 This disable console in & out.
+
 config IDENT_STRING
 	string "Board specific string to be added to uboot version string"
 	help
@@ -576,6 +581,13 @@ config BOARD_EARLY_INIT_F
 	  Note that the normal serial console is not yet set up, but the
 	  debug UART will be available if enabled.
 
+config BOARD_EARLY_INIT_R
+	bool "Call board-specific init after relocation"
+	help
+	  Some boards need to perform initialisation as directly after
+	  relocation. With this option, U-Boot calls board_early_init_r()
+	  in the post-relocation init sequence.
+
 endmenu
 config ANDROID_BOOTLOADER
 	bool "Support for Android Bootloader boot flow"
@@ -629,14 +641,13 @@ config ANDROID_BOOT_IMAGE
 	  This enables support for booting images which use the Android
 	  image format header.
 
-config ANDROID_BOOT_IMAGE_SEPARATE
-	bool "Enable support for Android image separate loading"
+config ANDROID_BOOT_IMAGE_HASH
+	bool "Enable support for Android image hash verify"
 	depends on ANDROID_BOOT_IMAGE
-	default y
+	select SHA1 if !DM_CRYPTO
 	help
-	  This enables support for android image separate loading. With this support,
-	  we can load ramdisk/fdt/kernel separate and skip ramdisk and fdt relocation
-	  safely. It saves a lot of boot time.
+	  This enables support for Android image hash verify, the mkbootimg always use
+	  SHA1 for images.
 
 config SKIP_RELOCATE_UBOOT
 	bool "Skip U-Boot relocation"

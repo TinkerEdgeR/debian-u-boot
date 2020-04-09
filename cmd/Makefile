@@ -24,7 +24,7 @@ obj-$(CONFIG_CMD_BDI) += bdinfo.o
 obj-$(CONFIG_CMD_BEDBUG) += bedbug.o
 obj-$(CONFIG_CMD_BLOCK_CACHE) += blkcache.o
 obj-$(CONFIG_CMD_BMP) += bmp.o
-obj-$(CONFIG_CMD_BOOT_ANDROID) += boot_android.o
+obj-$(CONFIG_CMD_BOOT_ANDROID) += boot_android.o android.o
 obj-$(CONFIG_CMD_BOOT_ROCKCHIP) += bootrkp.o
 obj-$(CONFIG_CMD_BOOTEFI) += bootefi.o
 obj-$(CONFIG_CMD_BOOTMENU) += bootmenu.o
@@ -81,7 +81,7 @@ obj-$(CONFIG_CMD_CRAMFS) += cramfs.o
 obj-$(CONFIG_LED_STATUS_CMD) += legacy_led.o
 obj-$(CONFIG_CMD_LED) += led.o
 obj-$(CONFIG_CMD_LICENSE) += license.o
-obj-y += load.o
+obj-y += load.o download.o
 obj-$(CONFIG_CMD_LOAD_ANDROID) += load_android.o android_cmds.o
 obj-$(CONFIG_CMD_LOG) += log.o
 obj-$(CONFIG_ID_EEPROM) += mac.o
@@ -99,8 +99,9 @@ obj-$(CONFIG_CMD_MISC) += misc.o
 obj-$(CONFIG_CMD_MMC) += mmc.o
 obj-$(CONFIG_CMD_MMC_SPI) += mmc_spi.o
 obj-$(CONFIG_MP) += mp.o
-obj-$(CONFIG_CMD_MTDPARTS) += mtdparts.o
 obj-$(CONFIG_CMD_MTD) += mtd.o
+obj-$(CONFIG_CMD_MTDPARTS) += mtdparts.o
+obj-$(CONFIG_CMD_MTD_BLK) += mtd_blk.o
 obj-$(CONFIG_CMD_NAND) += nand.o
 obj-$(CONFIG_CMD_NET) += net.o
 obj-$(CONFIG_CMD_ONENAND) += onenand.o
@@ -121,6 +122,7 @@ obj-$(CONFIG_CMD_NVME) += nvme.o
 obj-$(CONFIG_CMD_ROCKUSB) += rockusb.o
 obj-$(CONFIG_CMD_RKNAND) += rknand.o
 obj-$(CONFIG_CMD_RKSFC) += rksfc.o
+obj-$(CONFIG_CMD_RK_SECURE_STORAGE) += rk_secure_storage.o
 obj-$(CONFIG_CMD_SF) += sf.o
 obj-$(CONFIG_CMD_SCSI) += scsi.o disk.o
 obj-$(CONFIG_CMD_SHA1SUM) += sha1sum.o
@@ -166,6 +168,8 @@ obj-$(CONFIG_CMD_REGULATOR) += regulator.o
 obj-$(CONFIG_CMD_DVFS) += dvfs.o
 
 obj-$(CONFIG_CMD_BLOB) += blob.o
+
+obj-$(CONFIG_ARCH_ROCKCHIP) += rkimgtest.o
 endif # !CONFIG_SPL_BUILD
 
 # core command

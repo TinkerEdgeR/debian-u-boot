@@ -399,9 +399,11 @@
 	status = "okay";
 };
 
+&crypto {
+	status = "okay";
+};
+
 &emmc {
-	u-boot,dm-pre-reloc;
-	fifo-mode;
 	bus-width = <8>;
 	cap-mmc-highspeed;
 	mmc-hs200-1_8v;
@@ -415,6 +417,10 @@
 };
 
 &pwm1 {
+	status = "okay";
+};
+
+&uart5 {
 	status = "okay";
 };
 

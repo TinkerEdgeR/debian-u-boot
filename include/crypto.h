@@ -6,15 +6,23 @@
 #ifndef _CORE_CRYPTO_H_
 #define _CORE_CRYPTO_H_
 
+#include <common.h>
+#include <dm.h>
+#include <u-boot/sha1.h>
+
 /* Algorithms/capability of crypto, works together with crypto_algo_nbits() */
 #define CRYPTO_MD5		BIT(0)
 #define CRYPTO_SHA1		BIT(1)
 #define CRYPTO_SHA256		BIT(2)
-#define CRYPTO_RSA512		BIT(3)
-#define CRYPTO_RSA1024		BIT(4)
-#define CRYPTO_RSA2048		BIT(5)
-#define CRYPTO_RSA3072		BIT(6)
-#define CRYPTO_RSA4096		BIT(7)
+#define CRYPTO_SHA512		BIT(3)
+
+#define CRYPTO_RSA512		BIT(10)
+#define CRYPTO_RSA1024		BIT(11)
+#define CRYPTO_RSA2048		BIT(12)
+#define CRYPTO_RSA3072		BIT(13)
+#define CRYPTO_RSA4096		BIT(14)
+
+#define CRYPTO_TRNG		BIT(15)
 
 #define BYTE2WORD(bytes)	((bytes) / 4)
 #define BITS2BYTE(nbits)	((nbits) / 8)
@@ -45,6 +53,9 @@ struct dm_crypto_ops {
 	/* RSA verify */
 	int (*rsa_verify)(struct udevice *dev, rsa_key *ctx,
 			  u8 *sign, u8 *output);
+
+	/* TRNG get */
+	int (*get_trng)(struct udevice *dev, u8 *output, u32 len);
 };
 
 /**
@@ -120,5 +131,16 @@ int crypto_sha_csum(struct udevice *dev, sha_context *ctx,
  * @return 0 on success, otherwise failed
  */
 int crypto_rsa_verify(struct udevice *dev, rsa_key *ctx, u8 *sign, u8 *output);
+
+/**
+ * crypto_get_trng() - Crypto get trng
+ *
+ * @dev: crypto device
+ * @output: output trng data
+ * @len: trng len to get
+ *
+ * @return 0 on success, otherwise failed
+ */
+int crypto_get_trng(struct udevice *dev, u8 *output, u32 len);
 
 #endif

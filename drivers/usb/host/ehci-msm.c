@@ -133,8 +133,7 @@ static int ehci_usb_remove(struct udevice *dev)
 	setbits_le32(&ehci->usbcmd, CMD_RESET);
 
 	/* Wait for reset */
-	if (wait_for_bit(__func__, &ehci->usbcmd, CMD_RESET, false, 30,
-			 false)) {
+	if (wait_for_bit_le32(&ehci->usbcmd, CMD_RESET, false, 30, false)) {
 		printf("Stuck on USB reset.\n");
 		return -ETIMEDOUT;
 	}
@@ -174,5 +173,6 @@ U_BOOT_DRIVER(usb_ehci) = {
 	.remove = ehci_usb_remove,
 	.ops	= &ehci_usb_ops,
 	.priv_auto_alloc_size = sizeof(struct msm_ehci_priv),
+	.platdata_auto_alloc_size = sizeof(struct usb_platdata),
 	.flags	= DM_FLAG_ALLOC_PRIV_DMA,
 };

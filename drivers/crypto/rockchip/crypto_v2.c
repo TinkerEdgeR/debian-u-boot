@@ -64,6 +64,17 @@ static const u8 null_hash_sha256_value[] = {
 	0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55
 };
 
+static const u8 null_hash_sha512_value[] = {
+	0xcf, 0x83, 0xe1, 0x35, 0x7e, 0xef, 0xb8, 0xbd,
+	0xf1, 0x54, 0x28, 0x50, 0xd6, 0x6d, 0x80, 0x07,
+	0xd6, 0x20, 0xe4, 0x05, 0x0b, 0x57, 0x15, 0xdc,
+	0x83, 0xf4, 0xa9, 0x21, 0xd3, 0x6c, 0xe9, 0xce,
+	0x47, 0xd0, 0xd1, 0x3c, 0x5d, 0x85, 0xf2, 0xb0,
+	0xff, 0x83, 0x18, 0xd2, 0x87, 0x7e, 0xec, 0x2f,
+	0x63, 0xb9, 0x31, 0xbd, 0x47, 0x41, 0x7a, 0x81,
+	0xa5, 0x38, 0x32, 0x7a, 0xf9, 0x27, 0xda, 0x3e
+};
+
 fdt_addr_t crypto_base;
 
 static void word2byte(u32 word, u8 *ch, u32 endian)
@@ -166,6 +177,12 @@ int rk_hash_init(void *hw_ctx, u32 algo)
 		tmp_ctx->digest_size = 32;
 		tmp_ctx->null_hash = null_hash_sha256_value;
 		break;
+	case CRYPTO_SHA512:
+		reg_ctrl |= CRYPTO_MODE_SHA512;
+		tmp_ctx->digest_size = 64;
+		tmp_ctx->null_hash = null_hash_sha512_value;
+		break;
+
 	default:
 		ret = -EINVAL;
 		goto exit;
@@ -421,16 +438,56 @@ exit:
 	return ret;
 }
 
+static int rk_trng(u8 *trng, u32 len)
+{
+	u32 i, reg_ctrl = 0;
+	int ret = -EINVAL;
+	u32 buf[8];
+
+	if (len > CRYPTO_TRNG_MAX)
+		return -EINVAL;
+
+	memset(buf, 0, sizeof(buf));
+
+	/* enable osc_ring to get entropy, sample period is set as 50 */
+	crypto_write(50, CRYPTO_RNG_SAMPLE_CNT);
+
+	reg_ctrl |= CRYPTO_RNG_256_bit_len;
+	reg_ctrl |= CRYPTO_RNG_SLOWER_SOC_RING_1;
+	reg_ctrl |= CRYPTO_RNG_ENABLE;
+	reg_ctrl |= CRYPTO_RNG_START;
+	reg_ctrl |= CRYPTO_WRITE_MASK_ALL;
+
+	crypto_write(reg_ctrl | CRYPTO_WRITE_MASK_ALL, CRYPTO_RNG_CTL);
+	RK_WHILE_TIME_OUT(crypto_read(CRYPTO_RNG_CTL) & CRYPTO_RNG_START,
+			  RK_CRYPTO_TIME_OUT, ret);
+
+	if (ret == 0) {
+		for (i = 0; i < ARRAY_SIZE(buf); i++)
+			buf[i] = crypto_read(CRYPTO_RNG_DOUT_0 + i * 4);
+		memcpy(trng, buf, len);
+	}
+
+	/* close TRNG */
+	crypto_write(0 | CRYPTO_WRITE_MASK_ALL, CRYPTO_RNG_CTL);
+
+	return ret;
+}
+
 static u32 rockchip_crypto_capability(struct udevice *dev)
 {
 	return CRYPTO_MD5 |
 	       CRYPTO_SHA1 |
 	       CRYPTO_SHA256 |
+#if !defined(CONFIG_ROCKCHIP_RK1808)
+	       CRYPTO_SHA512 |
+#endif
 	       CRYPTO_RSA512 |
 	       CRYPTO_RSA1024 |
 	       CRYPTO_RSA2048 |
 	       CRYPTO_RSA3072 |
-	       CRYPTO_RSA4096;
+	       CRYPTO_RSA4096 |
+	       CRYPTO_TRNG;
 }
 
 static int rockchip_crypto_sha_init(struct udevice *dev, sha_context *ctx)
@@ -541,12 +598,33 @@ exit:
 	return ret;
 }
 
+static int rockchip_crypto_get_trng(struct udevice *dev, u8 *output, u32 len)
+{
+	int ret;
+	u32 i;
+
+	if (!dev || !output || !len)
+		return -EINVAL;
+
+	for (i = 0; i < len / CRYPTO_TRNG_MAX; i++) {
+		ret = rk_trng(output + i * CRYPTO_TRNG_MAX, CRYPTO_TRNG_MAX);
+		if (ret)
+			goto fail;
+	}
+
+	ret = rk_trng(output + i * CRYPTO_TRNG_MAX, len % CRYPTO_TRNG_MAX);
+
+fail:
+	return ret;
+}
+
 static const struct dm_crypto_ops rockchip_crypto_ops = {
 	.capability = rockchip_crypto_capability,
 	.sha_init   = rockchip_crypto_sha_init,
 	.sha_update = rockchip_crypto_sha_update,
 	.sha_final  = rockchip_crypto_sha_final,
 	.rsa_verify = rockchip_crypto_rsa_verify,
+	.get_trng = rockchip_crypto_get_trng,
 };
 
 /*
@@ -644,6 +722,8 @@ static int rockchip_crypto_probe(struct udevice *dev)
 
 static const struct udevice_id rockchip_crypto_ids[] = {
 	{ .compatible = "rockchip,px30-crypto" },
+	{ .compatible = "rockchip,rk1808-crypto" },
+	{ .compatible = "rockchip,rk3308-crypto" },
 	{ }
 };
 

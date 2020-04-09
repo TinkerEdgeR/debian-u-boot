@@ -30,6 +30,8 @@ static const unsigned int sd_au_size[] = {
 	SZ_16M / 512,	(SZ_16M + SZ_8M) / 512,	SZ_32M / 512,	SZ_64M / 512,
 };
 
+static char mmc_ext_csd[512];
+
 #if CONFIG_IS_ENABLED(MMC_TINY)
 static struct mmc mmc_static;
 struct mmc *find_mmc_device(int dev_num)
@@ -543,9 +545,17 @@ static int mmc_complete_op_cond(struct mmc *mmc)
 
 static int mmc_send_ext_csd(struct mmc *mmc, u8 *ext_csd)
 {
+	static int initialized;
 	struct mmc_cmd cmd;
 	struct mmc_data data;
 	int err;
+
+	if (initialized) {
+		memcpy(ext_csd, mmc_ext_csd, 512);
+		return 0;
+	}
+
+	initialized = 1;
 
 	/* Get the Card Status Register */
 	cmd.cmdidx = MMC_CMD_SEND_EXT_CSD;
@@ -558,6 +568,7 @@ static int mmc_send_ext_csd(struct mmc *mmc, u8 *ext_csd)
 	data.flags = MMC_DATA_READ;
 
 	err = mmc_send_cmd(mmc, &cmd, &data);
+	memcpy(mmc_ext_csd, ext_csd, 512);
 
 	return err;
 }
@@ -840,7 +851,6 @@ static int mmc_select_hs_ddr(struct mmc *mmc)
 	return 0;
 }
 
-#ifndef CONFIG_SPL_BUILD
 static int mmc_select_hs200(struct mmc *mmc)
 {
 	int ret;
@@ -864,7 +874,6 @@ static int mmc_select_hs200(struct mmc *mmc)
 
 	return ret;
 }
-#endif
 
 static int mmc_select_hs400(struct mmc *mmc)
 {
@@ -995,12 +1004,9 @@ static int mmc_change_freq(struct mmc *mmc)
 
 	avail_type = mmc_select_card_type(mmc, ext_csd);
 
-#ifndef CONFIG_SPL_BUILD
 	if (avail_type & EXT_CSD_CARD_TYPE_HS200)
 		err = mmc_select_hs200(mmc);
-	else
-#endif
-	if (avail_type & EXT_CSD_CARD_TYPE_HS)
+	else if (avail_type & EXT_CSD_CARD_TYPE_HS)
 		err = mmc_select_hs(mmc);
 	else
 		err = -EINVAL;

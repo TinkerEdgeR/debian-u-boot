@@ -80,6 +80,7 @@ static struct spl_info spl_infos[] = {
 	{ "rk3399", "RK33", 0x30000 - 0x2000, false },
 	{ "px30", "RK33", 0x2800, false },
 	{ "rv1108", "RK11", 0x1800, false },
+	{ "rk1808", "RK18", 0x200000 - 0x2000, false},
 };
 
 static unsigned char rc4_key[16] = {
@@ -201,7 +202,8 @@ int rkcommon_set_header(void *buf, uint file_size, uint max_size,
 	rkcommon_set_header0(buf, file_size, max_size, params);
 
 	/* Set up the SPL name (i.e. copy spl_hdr over) */
-	memcpy(&hdr->magic, rkcommon_get_spl_hdr(params), RK_SPL_HDR_SIZE);
+	if (memcmp(&hdr->magic, "RSAK", 4))
+		memcpy(&hdr->magic, rkcommon_get_spl_hdr(params), RK_SPL_HDR_SIZE);
 
 	if (rkcommon_need_rc4_spl(params))
 		rkcommon_rc4_encode_spl(buf, RK_SPL_HDR_START,

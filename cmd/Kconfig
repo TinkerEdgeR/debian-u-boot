@@ -537,6 +537,7 @@ config CMD_CRYPTO
 	depends on DM_CRYPTO
 	select SHA1
 	select SHA256
+	select SHA512
 	select MD5
 	help
 	  Crypto test.
@@ -818,6 +819,12 @@ config CMD_MMC
 	help
 	  MMC memory mapped support.
 
+config CMD_MTD
+	bool "mtd"
+	select MTD_PARTITIONS
+	help
+	  MTD commands support.
+
 config CMD_NAND
 	bool "nand"
 	default y if NAND_SUNXI
@@ -922,6 +929,11 @@ config CMD_RKSFC
 	default y if (RKSFC_NOR || RKSFC_NAND)
 	help
 	  Rockchip SFC device support
+
+config CMD_RK_SECURE_STORAGE
+	bool "dump rockchip efuse/otp content"
+	help
+	  Dump the data which is written in OTP or efuse.
 
 config CMD_SATA
 	bool "sata - Access SATA subsystem"
@@ -1495,6 +1507,7 @@ config CMD_JFFS2
 
 config CMD_MTDPARTS
 	bool "MTD partition support"
+	select MTD_DEVICE if (CMD_NAND || NAND)
 	help
 	  MTD partition support
 
@@ -1503,15 +1516,20 @@ config CMD_MTD
 	help
 	  MTD support
 
+config CMD_MTD_BLK
+	bool "MTD block support"
+	help
+	  MTD block support
+
 config MTDIDS_DEFAULT
 	string "Default MTD IDs"
-	depends on CMD_MTDPARTS
+	depends on CMD_MTD || CMD_MTDPARTS || CMD_NAND || CMD_FLASH
 	help
 	  Defines a default MTD ID
 
 config MTDPARTS_DEFAULT
 	string "Default MTD partition scheme"
-	depends on CMD_MTDPARTS
+	depends on CMD_MTD || CMD_MTDPARTS || CMD_NAND || CMD_FLASH
 	help
 	  Defines a default MTD partitioning scheme in the Linux MTD command
 	  line partitions format

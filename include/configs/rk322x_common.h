@@ -10,7 +10,7 @@
 #include "rockchip-common.h"
 
 #define CONFIG_SKIP_LOWLEVEL_INIT
-#define CONFIG_SYS_MALLOC_LEN		(128 << 20)
+#define CONFIG_SYS_MALLOC_LEN		(32 << 20)
 #define CONFIG_SYS_CBSIZE		2048
 #define CONFIG_SYS_BOOTM_LEN	(64 << 20)	/*  64M */
 
@@ -50,10 +50,7 @@
 
 #include <config_distro_bootcmd.h>
 
-/* Linux fails to load the fdt if it's loaded above 512M on a evb-rk3036 board,
- * so limit the fdt reallocation to that */
 #define CONFIG_EXTRA_ENV_SETTINGS \
-	"fdt_high=0x7fffffff\0" \
 	"partitions=" PARTS_DEFAULT \
 	ENV_MEM_LAYOUT_SETTINGS \
 	ROCKCHIP_DEVICE_SETTINGS \

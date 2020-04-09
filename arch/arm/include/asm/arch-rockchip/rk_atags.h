@@ -33,6 +33,7 @@
 #endif
 
 /* tag_bootdev.devtype */
+#define BOOT_TYPE_UNKNOWN	0
 #define BOOT_TYPE_NAND		(1 << 0)
 #define BOOT_TYPE_EMMC		(1 << 1)
 #define BOOT_TYPE_SD0		(1 << 2)
@@ -54,6 +55,9 @@
 #define SOC_FLAGS_ET00		0x45543030
 #define SOC_FLAGS_ET01		0x45543031
 #define SOC_FLAGS_ET02		0x45543032
+
+/* pub key programmed magic */
+#define PUBKEY_FUSE_PROGRAMMED	0x4B415352
 
 struct tag_serial {
 	u32 version;
@@ -117,8 +121,9 @@ struct tag_atf_mem {
 struct tag_pub_key {
 	u32 version;
 	u32 len;
-	u8  data[768];
-	u32 reserved[6];
+	u8  data[768];	/* u32 rsa_n[64], rsa_e[64], rsa_c[64] */
+	u32 flag;
+	u32 reserved[5];
 	u32 hash;
 } __packed;
 
@@ -208,6 +213,44 @@ struct tag *atags_get_tag(u32 magic);
  */
 int atags_is_available(void);
 
+#ifdef CONFIG_SPL_BUILD
+/*
+ * get_bootdev_by_brom_bootsource
+ *
+ * @magic: void
+ *
+ * return: boootdev, else 0 fail.
+ */
+int get_bootdev_by_brom_bootsource(void);
+
+/*
+ * atags_set_bootdev_by_brom_bootsource
+ *
+ * @magic: void
+ *
+ * return: 0 success, others fail.
+ */
+int atags_set_bootdev_by_brom_bootsource(void);
+
+/*
+ * get_bootdev_by_spl_bootdevice
+ *
+ * @bootdevice
+ *
+ * return: boootdev, else -ENODEV fail.
+ */
+int get_bootdev_by_spl_bootdevice(int bootdevice);
+
+/*
+ * atags_set_bootdev_by_spl_bootdevice
+ *
+ * @bootdevice
+ *
+ * return: 0 success, others fail.
+ */
+int atags_set_bootdev_by_spl_bootdevice(int bootdevice);
+#endif
+
 /* Print only one tag */
 void atags_print_tag(struct tag *t);
 
@@ -222,8 +265,13 @@ void atags_stat(void);
 
 #if CONFIG_IS_ENABLED(TINY_FRAMEWORK) &&		\
 	!CONFIG_IS_ENABLED(LIBGENERIC_SUPPORT) &&	\
-	defined(CONFIG_ARM64)
+	!CONFIG_IS_ENABLED(USE_ARCH_MEMSET)
 void *memset(void *s, int c, size_t count);
+#endif
+
+#if CONFIG_IS_ENABLED(TINY_FRAMEWORK) &&		\
+	!CONFIG_IS_ENABLED(LIBGENERIC_SUPPORT) &&	\
+	!CONFIG_IS_ENABLED(USE_ARCH_MEMCPY)
 void *memcpy(void *dest, const void *src, size_t count);
 #endif
 

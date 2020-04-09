@@ -308,6 +308,7 @@
 		clocks = <&cru HCLK_SDMMC>, <&cru SCLK_SDMMC>,
 			 <&cru SCLK_SDMMC_DRV>, <&cru SCLK_SDMMC_SAMPLE>;
 		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
+		cd-gpios = <&gpio0 RK_PA1 GPIO_ACTIVE_HIGH>;
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
 		reg = <0x30130000 0x4000>;
@@ -599,26 +600,26 @@
 
 		sdmmc {
 			sdmmc_clk: sdmmc-clk {
-				rockchip,pins = <3 RK_PC4 RK_FUNC_1 &pcfg_pull_none_drv_4ma>;
+				rockchip,pins = <3 RK_PC4 RK_FUNC_1 &pcfg_pull_none_drv_8ma>;
 			};
 
 			sdmmc_cmd: sdmmc-cmd {
-				rockchip,pins = <3 RK_PC5 RK_FUNC_1 &pcfg_pull_up_drv_4ma>;
+				rockchip,pins = <3 RK_PC5 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
 			};
 
 			sdmmc_cd: sdmmc-cd {
-				rockchip,pins = <0 RK_PA1 RK_FUNC_1 &pcfg_pull_up_drv_4ma>;
+				rockchip,pins = <0 RK_PA1 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
 			};
 
 			sdmmc_bus1: sdmmc-bus1 {
-				rockchip,pins = <3 RK_PC3 RK_FUNC_1 &pcfg_pull_up_drv_4ma>;
+				rockchip,pins = <3 RK_PC3 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
 			};
 
 			sdmmc_bus4: sdmmc-bus4 {
-				rockchip,pins = <3 RK_PC3 RK_FUNC_1 &pcfg_pull_up_drv_4ma>,
-						<3 RK_PC2 RK_FUNC_1 &pcfg_pull_up_drv_4ma>,
-						<3 RK_PC1 RK_FUNC_1 &pcfg_pull_up_drv_4ma>,
-						<3 RK_PC0 RK_FUNC_1 &pcfg_pull_up_drv_4ma>;
+				rockchip,pins = <3 RK_PC3 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
+						<3 RK_PC2 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
+						<3 RK_PC1 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
+						<3 RK_PC0 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
 			};
 		};
 
