@@ -49,6 +49,8 @@ struct hw_config
 
 	int overlay_count;
 	char **overlay_file;
+
+	char *dev_part;
 };
 
 static unsigned long hw_skip_comment(char *text)
@@ -323,10 +325,18 @@ static unsigned long hw_parse_property(char *text, struct hw_config *hw_conf)
 static void parse_hw_config(struct hw_config *hw_conf)
 {
 	unsigned long count, offset = 0, addr, size;
-	char *file_addr;
+	char *file_addr, *dev_part;
 	static char *fs_argv[5];
 
 	int valid = 0;
+
+	dev_part = env_get("devnum");
+	if (!dev_part) {
+		printf("Can't get devnum\n");
+		dev_part = "0";
+	}
+	strncat(dev_part, ":7", 3);
+	hw_conf->dev_part = dev_part;
 
 	file_addr = env_get("conf_addr");
 	if (!file_addr) {
@@ -340,7 +350,7 @@ static void parse_hw_config(struct hw_config *hw_conf)
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = "0:7";
+	fs_argv[2] = dev_part;
 	fs_argv[3] = file_addr;
 	fs_argv[4] = "config.txt";
 
@@ -520,7 +530,7 @@ static int fdt_valid(struct fdt_header **blobp)
 	return 1;
 }
 
-static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name)
+static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name, struct hw_config *hw_conf)
 {
 	unsigned long addr;
 	char *file_addr;
@@ -543,7 +553,7 @@ static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, c
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = "0:7";
+	fs_argv[2] = hw_conf->dev_part;
 	fs_argv[3] = file_addr;
 	fs_argv[4] = overlay_file;
 
@@ -599,7 +609,7 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 #ifdef CONFIG_OF_LIBFDT_OVERLAY
 	int i;
 	for (i = 0; i < hw_conf->overlay_count; i++) {
-		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i]) < 0)
+		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i], hw_conf) < 0)
 			printf("Can't merge dts overlay: %s\n", hw_conf->overlay_file[i]);
 		else
 			printf("Merged dts overlay: %s\n", hw_conf->overlay_file[i]);
