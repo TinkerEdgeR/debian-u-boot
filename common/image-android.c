@@ -268,12 +268,36 @@ static int set_file_conf(char *text, struct hw_config *hw_conf, int start_point,
 		ptr[name_length] = 0x00;
 		hw_conf->overlay_file[hw_conf->overlay_count] = ptr;
 		hw_conf->overlay_count += 1;
-
-		//Pass a space for next string.
-		start_point = file_ptr + 1;
 	}
+	//Pass a space for next string.
+	start_point = file_ptr + 1;
 
 	return start_point;
+}
+
+void get_overlay_count(char *text, struct hw_config *hw_conf)
+{
+	int i = 0;
+	int start_point = 0;
+	int overlay_count = 0;
+	int name_length;
+
+	while(*(text + i) != 0x00)
+	{
+		if(*(text + i) == 0x20 || *(text + i) == 0x0a) {
+			name_length = i - start_point;
+			if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH)
+				overlay_count += 1;
+		}
+
+		if(*(text + i) == 0x20)
+			start_point = i + 1;
+		else if(*(text + i) == 0x0a)
+			break;
+		i++;
+	}
+
+	hw_conf->overlay_file = (char**)calloc(overlay_count, sizeof(char*));
 }
 
 static unsigned long get_overlay(char *text, struct hw_config *hw_conf)
@@ -308,6 +332,7 @@ static unsigned long hw_parse_property(char *text, struct hw_config *hw_conf)
 		i = i + get_conf_value(text + i, hw_conf);
 	} else if(memcmp(text, "overlay=", 8) == 0) {
 		i = 8;
+		get_overlay_count(text + i, hw_conf);
 		i = i + get_overlay(text + i, hw_conf);
 	} else {
 		printf("[conf] hw_parse_property: illegal line\n");
@@ -636,6 +661,7 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 
 		free(hw_conf->overlay_file[i]);
 	}
+	free(hw_conf->overlay_file);
 #endif
 
 	if (hw_conf->fiq_debugger == 1)
