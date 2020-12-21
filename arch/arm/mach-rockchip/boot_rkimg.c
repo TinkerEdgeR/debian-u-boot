@@ -32,7 +32,26 @@
 #include <u-boot/sha256.h>
 #include <linux/usb/phy-rockchip-inno-usb2.h>
 
+#define GPIO2_SWPORTA_DDR_REG	0xff780004
+#define GPIO2_SWPORTA_DR_REG	0xff780000
+
 DECLARE_GLOBAL_DATA_PTR;
+
+void rk3399_mask_release_high(void)
+{
+	printf("Set GPIO2_A4 (MASK_RELEASE) output high\n");
+
+	uint32_t reg_gpio2a_ddr = readl((void *)GPIO2_SWPORTA_DDR_REG);
+	uint32_t reg_gpio2a_dr = readl((void *)GPIO2_SWPORTA_DR_REG);
+
+	// Set GPIO2_A4 to direction output.
+	writel(reg_gpio2a_ddr | (1 << 4), GPIO2_SWPORTA_DDR_REG);
+
+	// Set GPIO2_A4 to High.
+	writel(reg_gpio2a_dr | (1 << 4), GPIO2_SWPORTA_DR_REG);
+
+	mdelay(10);
+}
 
 static void boot_devtype_init(void)
 {
@@ -44,6 +63,8 @@ static void boot_devtype_init(void)
 
 	if (done)
 		return;
+
+	rk3399_mask_release_high();
 
 	ret = param_parse_bootdev(&devtype, &devnum);
 	if (!ret) {
