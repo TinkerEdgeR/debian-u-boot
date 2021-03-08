@@ -213,6 +213,7 @@ enum {
 #define RK8XX_OFF_SOURCE	0xaf
 #define RK817_ON_SOURCE		0xf5
 #define RK817_OFF_SOURCE	0xf6
+#define RK817_NUM_OF_REGS	0xff
 
 /* IRQ definitions */
 #define RK8XX_IRQ_PWRON_FALL		0

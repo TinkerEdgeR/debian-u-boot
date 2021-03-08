@@ -213,6 +213,11 @@ config BOOTARGS
 	  CONFIG_BOOTARGS goes into the environment value "bootargs". Note that
 	  this value will also override the "chosen" node in FDT blob.
 
+config IO_TRACE
+	bool "Enable iotrace"
+	help
+	  This enable iotrace feature.
+
 menu "Console"
 
 config MENU
@@ -250,10 +255,11 @@ config CONSOLE_RECORD_IN_SIZE
 	  The buffer is allocated immediately after the malloc() region is
 	  ready.
 
-config CONSOLE_DISABLE_CTRLC
+config CONSOLE_DISABLE_CLI
 	bool "disable ctrlc"
+	default n
 	help
-	  This disable ctrl+c when CONFIG_BOOTDELAY is 0.
+	  This disable CLI interactive in verified-boot.
 
 config DISABLE_CONSOLE
 	bool "disable console in & out"
@@ -651,6 +657,7 @@ config ANDROID_BOOT_IMAGE_HASH
 
 config SKIP_RELOCATE_UBOOT
 	bool "Skip U-Boot relocation"
+	default y if !ARM64
 	help
 	  This enable support for skipping U-Boot relocation.
 
@@ -667,3 +674,4 @@ config HASH
 endmenu
 
 source "common/spl/Kconfig"
+source "common/usbplug/Kconfig"

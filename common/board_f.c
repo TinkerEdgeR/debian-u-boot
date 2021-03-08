@@ -160,7 +160,9 @@ static int announce_pre_serial(void)
 
 static int announce_dram_init(void)
 {
+#ifndef CONFIG_SUPPORT_USBPLUG
 	puts("DRAM:  ");
+#endif
 	return 0;
 }
 
@@ -188,10 +190,12 @@ static int show_dram_config(void)
 #ifdef CONFIG_BIDRAM
 	size += bidram_append_size();
 #endif
+
+#ifndef CONFIG_SUPPORT_USBPLUG
 	print_size(size, "");
 	board_add_ram_info(0);
 	putc('\n');
-
+#endif
 	return 0;
 }
 
@@ -237,7 +241,7 @@ static int setup_mon_len(void)
 	gd->mon_len = (ulong)&_end - (ulong)_init;
 #elif defined(CONFIG_NIOS2) || defined(CONFIG_XTENSA)
 	gd->mon_len = CONFIG_SYS_MONITOR_LEN;
-#elif defined(CONFIG_NDS32) || defined(CONFIG_SH)
+#elif defined(CONFIG_NDS32) || defined(CONFIG_SH) || defined(CONFIG_RISCV)
 	gd->mon_len = (ulong)(&__bss_end) - (ulong)(&_start);
 #elif defined(CONFIG_SYS_MONITOR_BASE)
 	/* TODO: use (ulong)&__bss_end - (ulong)&__text_start; ? */
@@ -435,6 +439,23 @@ static int reserve_malloc(void)
 			TOTAL_MALLOC_LEN >> 10, gd->start_addr_sp);
 	return 0;
 }
+
+#ifdef CONFIG_SYS_NONCACHED_MEMORY
+static int reserve_noncached(void)
+{
+	phys_addr_t start, end;
+	size_t size;
+
+	end = ALIGN(gd->start_addr_sp, MMU_SECTION_SIZE) - MMU_SECTION_SIZE;
+	size = ALIGN(CONFIG_SYS_NONCACHED_MEMORY, MMU_SECTION_SIZE);
+	start = end - size;
+	gd->start_addr_sp = start;
+	debug("Reserving %zu for noncached_alloc() at: %08lx\n",
+	      size, gd->start_addr_sp);
+
+	return 0;
+}
+#endif
 
 /* (permanently) allocate a Board Info struct */
 static int reserve_board(void)
@@ -655,8 +676,10 @@ static int setup_reloc(void)
 #endif
 	memcpy(gd->new_gd, (char *)gd, sizeof(gd_t));
 
+#ifndef CONFIG_SUPPORT_USBPLUG
 	printf("Relocation Offset: %08lx, fdt: %08lx\n",
 	      gd->reloc_off, (ulong)gd->new_fdt);
+#endif
 	debug("Relocating to %08lx, new gd at %08lx, sp at %08lx\n",
 	      gd->relocaddr, (ulong)map_to_sysmem(gd->new_gd),
 	      gd->start_addr_sp);
@@ -874,6 +897,9 @@ static const init_fnc_t init_sequence_f[] = {
 	reserve_trace,
 	reserve_uboot,
 	reserve_malloc,
+#ifdef CONFIG_SYS_NONCACHED_MEMORY
+	reserve_noncached,
+#endif
 	reserve_board,
 	setup_machine,
 	reserve_global_data,

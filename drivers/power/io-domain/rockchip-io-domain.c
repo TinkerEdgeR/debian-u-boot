@@ -84,10 +84,11 @@ struct rockchip_iodomain_priv {
 static int rockchip_ofdata_to_platdata(struct udevice *dev)
 {
 	struct rockchip_iodomain_priv *priv = dev_get_priv(dev);
+	struct syscon_uc_info *syscon_priv;
 	struct regmap *regmap;
 
-	/* get grf-reg base address */
-	regmap = syscon_get_regmap_by_driver_data(ROCKCHIP_SYSCON_GRF);
+	syscon_priv = dev_get_uclass_priv(dev_get_parent(dev));
+	regmap = syscon_priv->regmap;
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
@@ -470,10 +471,26 @@ static const struct rockchip_iodomain_soc_data soc_data_rv1108_pmu = {
 	},
 };
 
+static const struct rockchip_iodomain_soc_data soc_data_rv1126_pmu = {
+	.grf_offset = 0x140,
+	.supply_names = {
+		NULL,
+		"vccio1",
+		"vccio2",
+		"vccio3",
+		"vccio4",
+		"vccio5",
+		"vccio6",
+		"vccio7",
+		"pmuio0",
+		"pmuio1",
+	},
+};
+
 static struct udevice *of_get_regulator(ofnode node, const char *supply)
 {
 	char sname[32]; /* 32 is max size of property name */
-	struct udevice *sudev;
+	struct udevice *sudev = NULL;
 	ofnode snode;
 	u32 phandle;
 	int ret;
@@ -518,20 +535,18 @@ static int rockchip_iodomain_probe(struct udevice *dev)
 			continue;
 
 		reg = of_get_regulator(dev_ofnode(dev), supply_name);
-		if (!reg) {
-			printf("could not find regulator %s\n", supply_name);
-			return -1;
-		}
+		if (!reg)
+			continue;
 
 		uV = regulator_get_value(reg);
-		if (uV < 0) {
-			printf("could not get voltage from %s\n", reg->name);
-			return -1;
+		if (uV <= 0) {
+			printf("voltage(%d uV) is invalid from %s\n", uV, reg->name);
+			continue;
 		}
 
 		if (uV > MAX_VOLTAGE_3_3) {
 			printf("%d uV is too high from %s\n", uV, reg->name);
-			return -1;
+			continue;
 		}
 
 		/* setup our supply */
@@ -606,6 +621,10 @@ static const struct udevice_id rockchip_iodomain_match[] = {
 	{
 		.compatible = "rockchip,rv1108-pmu-io-voltage-domain",
 		.data = (ulong)&soc_data_rv1108_pmu
+	},
+	{
+		.compatible = "rockchip,rv1126-pmu-io-voltage-domain",
+		.data = (ulong)&soc_data_rv1126_pmu
 	},
 	{ /* sentinel */ },
 };

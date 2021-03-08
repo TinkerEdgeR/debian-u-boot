@@ -129,7 +129,7 @@ static int initr_reloc_global_data(void)
 {
 #ifdef __ARM__
 	monitor_flash_len = _end - __image_copy_start;
-#elif defined(CONFIG_NDS32)
+#elif defined(CONFIG_NDS32) || defined(CONFIG_RISCV)
 	monitor_flash_len = (ulong)&_end - (ulong)&_start;
 #elif !defined(CONFIG_SANDBOX) && !defined(CONFIG_NIOS2)
 	monitor_flash_len = (ulong)&__init_end - gd->relocaddr;
@@ -420,9 +420,11 @@ static int initr_spi(void)
 /* go init the NAND */
 static int initr_nand(void)
 {
+#ifndef CONFIG_USING_KERNEL_DTB
 	puts("NAND:  ");
 	nand_init();
 	printf("%lu MiB\n", nand_size() / 1024);
+#endif
 	return 0;
 }
 #endif
@@ -446,6 +448,21 @@ static int initr_mmc(void)
 #ifndef CONFIG_USING_KERNEL_DTB
 	puts("MMC:   ");
 	mmc_initialize(gd->bd);
+#endif
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_MTD_BLK
+static int initr_mtd_blk(void)
+{
+#ifndef CONFIG_USING_KERNEL_DTB
+	struct blk_desc *dev_desc;
+
+	puts("mtd_blk:   ");
+	dev_desc = rockchip_get_bootdev();
+	if (dev_desc)
+		mtd_blk_map_partitions(dev_desc);
 #endif
 	return 0;
 }
@@ -512,6 +529,9 @@ static int initr_env_nowhere(void)
 #else
 	const char env_minimum[] = {
 		ENV_MEM_LAYOUT_SETTINGS
+#ifdef ENV_MEM_LAYOUT_SETTINGS1
+		ENV_MEM_LAYOUT_SETTINGS1
+#endif
 #ifdef RKIMG_DET_BOOTDEV
 		RKIMG_DET_BOOTDEV
 #endif
@@ -846,7 +866,7 @@ static init_fnc_t init_sequence_r[] = {
 	board_early_init_r,
 #endif
 
-#if defined(CONFIG_ARM) || defined(CONFIG_NDS32)
+#if defined(CONFIG_ARM) || defined(CONFIG_NDS32) || defined(CONFIG_RISCV)
 	board_init,	/* Setup chipselects */
 #endif
 
@@ -911,6 +931,9 @@ static init_fnc_t init_sequence_r[] = {
 #endif
 #ifdef CONFIG_CMD_ONENAND
 	initr_onenand,
+#endif
+#ifdef CONFIG_MTD_BLK
+	initr_mtd_blk,
 #endif
 #ifdef CONFIG_MMC
 	initr_mmc,

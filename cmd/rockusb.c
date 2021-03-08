@@ -37,8 +37,14 @@ static int rkusb_write_sector(struct ums *ums_dev,
 {
 	struct blk_desc *block_dev = &ums_dev->block_dev;
 	lbaint_t blkstart = start + ums_dev->start_sector;
+	int ret;
 
-	return blk_dwrite(block_dev, blkstart, blkcnt, buf);
+	if (block_dev->if_type == IF_TYPE_MTD)
+		block_dev->op_flag |= BLK_MTD_CONT_WRITE;
+	ret = blk_dwrite(block_dev, blkstart, blkcnt, buf);
+	if (block_dev->if_type == IF_TYPE_MTD)
+		block_dev->op_flag &= ~(BLK_MTD_CONT_WRITE);
+	return ret;
 }
 
 static int rkusb_erase_sector(struct ums *ums_dev,
@@ -259,7 +265,7 @@ cleanup_rkusb:
 	return rc;
 }
 
-U_BOOT_CMD(rockusb, 4, 1, do_rkusb,
-	   "Use the rockusb Protocol",
-	   "<USB_controller> <devtype> <dev[:part]>  e.g. rockusb 0 mmc 0\n"
+U_BOOT_CMD_ALWAYS(rockusb, 4, 1, do_rkusb,
+		  "Use the rockusb Protocol",
+		  "<USB_controller> <devtype> <dev[:part]>  e.g. rockusb 0 mmc 0\n"
 );

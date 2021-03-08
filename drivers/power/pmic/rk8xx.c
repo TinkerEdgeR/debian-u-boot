@@ -178,9 +178,9 @@ static const struct pmic_child_info rtc_info[] = {
 };
 
 static const struct pmic_child_info fuel_gauge_info[] = {
-	{ .prefix = "battery", .driver = "rk818_fg"},
-	{ .prefix = "battery", .driver = "rk817_fg"},
-	{ .prefix = "battery", .driver = "rk816_fg"},
+	{ .addr = "1c", .prefix = "battery", .driver = "rk818_fg"},
+	{ .addr = "20", .prefix = "battery", .driver = "rk817_fg"},
+	{ .addr = "1a", .prefix = "battery", .driver = "rk816_fg"},
 	{ },
 };
 
@@ -191,7 +191,15 @@ static const struct pmic_child_info rk817_codec_info[] = {
 
 static int rk8xx_reg_count(struct udevice *dev)
 {
-	return RK808_NUM_OF_REGS;
+	struct rk8xx_priv *priv = dev_get_priv(dev);
+
+	switch (priv->variant) {
+	case RK809_ID:
+	case RK817_ID:
+		return RK817_NUM_OF_REGS;
+	default:
+		return RK808_NUM_OF_REGS;
+	}
 }
 
 static int rk8xx_write(struct udevice *dev, uint reg, const uint8_t *buff,
@@ -266,17 +274,6 @@ static int rk8xx_shutdown(struct udevice *dev)
 	return 0;
 }
 
-/*
- * When system suspend during U-Boot charge, make sure the plugout event
- * be able to wakeup cpu in wfi/wfe state.
- */
-#ifdef CONFIG_DM_CHARGE_DISPLAY
-static void rk8xx_plug_out_handler(int irq, void *data)
-{
-	printf("Plug out interrupt\n");
-}
-#endif
-
 #if CONFIG_IS_ENABLED(PMIC_CHILDREN)
 static int rk8xx_bind(struct udevice *dev)
 {
@@ -318,6 +315,17 @@ static int rk8xx_bind(struct udevice *dev)
 #endif
 
 #if defined(CONFIG_IRQ) && !defined(CONFIG_SPL_BUILD)
+/*
+ * When system suspend during U-Boot charge, make sure the plugout event
+ * be able to wakeup cpu in wfi/wfe state.
+ */
+#ifdef CONFIG_DM_CHARGE_DISPLAY
+static void rk8xx_plug_out_handler(int irq, void *data)
+{
+	printf("Plug out interrupt\n");
+}
+#endif
+
 static int rk8xx_ofdata_to_platdata(struct udevice *dev)
 {
 	struct rk8xx_priv *rk8xx = dev_get_priv(dev);
