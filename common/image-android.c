@@ -1327,6 +1327,14 @@ static int android_image_separate(struct andr_img_hdr *hdr,
 	/* 2. Disable fdt/ramdisk relocation, it saves boot time */
 	env_set("bootm-no-reloc", "y");
 
+	working_fdt = resize_working_fdt();
+	if (working_fdt != NULL) {
+		handle_adc5_bid(NULL, working_fdt, &hw_conf);
+
+		if(hw_conf.valid)
+			handle_hw_conf(NULL, working_fdt, &hw_conf);
+	}
+
 	return 0;
 }
 
@@ -1368,14 +1376,6 @@ static int android_image_separate_v3(struct andr_img_hdr *hdr,
 
 	/* 2. Disable fdt/ramdisk relocation, it saves boot time */
 	env_set("bootm-no-reloc", "y");
-
-	working_fdt = resize_working_fdt();
-	if (working_fdt != NULL) {
-		handle_adc5_bid(NULL, working_fdt, &hw_conf);
-
-		if(hw_conf.valid)
-			handle_hw_conf(NULL, working_fdt, &hw_conf);
-	}
 
 	return 0;
 }
