@@ -2014,7 +2014,7 @@ static void update_noc_timing(struct dram_info *dram,
 		sdram_params->ch.noc_timings.ddrmode.b.burstsize = 3;
 
 	sdram_params->ch.noc_timings.ddrtimingc0.b.burstpenalty =
-		(bw == 32) ? 2 : ((bw == 16) ? 4 : 8);
+		(bl * bw / 8) > 16 ? (bl / 4) : (16 / (bl * bw / 8)) * bl / 4;
 
 	if (sdram_params->base.dramtype == LPDDR4) {
 		sdram_params->ch.noc_timings.ddrmode.b.mwrsize =
@@ -2193,6 +2193,12 @@ static int sdram_init_(struct dram_info *dram,
 	rkclk_ddr_reset(dram, 1, 0, 0, 0);
 	pctl_cfg(dram->pctl, &sdram_params->pctl_regs,
 		 dram->sr_idle, dram->pd_idle);
+
+	if (sdram_params->ch.cap_info.bw == 2)
+		/* 32bit interface use pageclose */
+		setbits_le32(pctl_base + DDR_PCTL2_SCHED, 1 << 2);
+	else
+		clrbits_le32(pctl_base + DDR_PCTL2_SCHED, 1 << 2);
 
 #ifdef CONFIG_ROCKCHIP_DRAM_EXTENDED_TEMP_SUPPORT
 	u32 tmp, trefi;
@@ -2439,9 +2445,24 @@ static int sdram_init_detect(struct dram_info *dram,
 	u32 ret;
 	u32 sys_reg = 0;
 	u32 sys_reg3 = 0;
+	struct sdram_head_info_index_v2 *index =
+		(struct sdram_head_info_index_v2 *)common_info;
+	struct dq_map_info *map_info;
 
-	if (sdram_init_(dram, sdram_params, 0) != 0)
-		return -1;
+	map_info = (struct dq_map_info *)((void *)common_info +
+		index->dq_map_index.offset * 4);
+
+	if (sdram_init_(dram, sdram_params, 0)) {
+		if (sdram_params->base.dramtype == DDR3) {
+			clrsetbits_le32(&map_info->byte_map[0], 0xff << 24,
+					((0x1 << 6) | (0x3 << 4) | (0x2 << 2) |
+					(0x0 << 0)) << 24);
+			if (sdram_init_(dram, sdram_params, 0))
+				return -1;
+		} else {
+			return -1;
+		}
+	}
 
 	if (sdram_params->base.dramtype == DDR3) {
 		writel(PATTERN, CONFIG_SYS_SDRAM_BASE);

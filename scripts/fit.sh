@@ -55,14 +55,10 @@ function help()
 	echo "    --version-boot          <decimal integer>"
 	echo "    --ini-trust"
 	echo "    --ini-loader"
-	echo "    --no-vboot"
 	echo "    --no-check"
-	echo "    --no-rebuild"
 	echo "    --spl-new"
-	echo "    --uboot-itb"
-	echo "    --boot-itb"
 	echo "    --boot_img"
-	echo "    --arg-check"
+	echo "    --args"
 	echo
 }
 
@@ -96,7 +92,7 @@ function check_its()
 function validate_arg()
 {
 	case $1 in
-		--uboot-itb|--boot-itb|--no-vboot|--no-rebuild|--no-check|--spl-new)
+		--no-check|--spl-new|--burn-key-hash)
 			shift=1
 			;;
 		--ini-trust|--ini-loader|--rollback-index-boot|--rollback-index-uboot|--boot_img|--version-uboot|--version-boot)
@@ -118,25 +114,17 @@ function fit_process_args()
 
 	while [ $# -gt 0 ]; do
 		case $1 in
-			--arg-check)
+			--args)
 				ARG_VALIDATE=$2
 				shift 2
 				;;
-			--uboot-itb)
-				ARG_PACK_UBOOT="y"
-				shift 1
+			--boot_img)     # boot.img
+				ARG_BOOT_IMG=$2
+				shift 2
 				;;
-			--boot-itb)
-				ARG_PACK_BOOT="y"
-				shift 1
-				;;
-			--no-vboot)     # Force to build non-vboot image
-				ARG_NO_VBOOT="y"
-				shift 1
-				;;
-			--no-rebuild)   # No rebuild with "./make.sh"
-				ARG_NO_REBUILD="y"
-				shift 1
+			--boot_img_dir) # boot.img components directory
+				ARG_BOOT_IMG_DIR=$2
+				shift 2
 				;;
 			--no-check)     # No hostcc fit signature check
 				ARG_NO_CHECK="y"
@@ -164,10 +152,6 @@ function fit_process_args()
 				arg_check_decimal $2
 				shift 2
 				;;
-			--boot_img)     # external boot.img
-				ARG_EXT_BOOT=$2
-				shift 2
-				;;
 			--version-uboot)
 				ARG_VER_UBOOT=$2
 				arg_check_decimal $2
@@ -178,23 +162,29 @@ function fit_process_args()
 				arg_check_decimal $2
 				shift 2
 				;;
+			--burn-key-hash)
+				ARG_BURN_KEY_HASH="y"
+				shift 1
+				;;
 			*)
 				help
 				exit 1
 				;;
 		esac
 	done
+
+	if grep -q '^CONFIG_FIT_SIGNATURE=y' .config ; then
+		ARG_SIGN="y"
+	fi
 }
 
-function fit_rebuild()
+function fit_raw_compile()
 {
 	# Verified-boot: should rebuild code but don't need to repack images.
-	if [ "${ARG_NO_REBUILD}" != "y" ]; then
-		./make.sh --no-pack # Build but not pack loader/trust/uboot, etc.
+	if [ "${ARG_SIGN}" == "y" ]; then
+		./make.sh --raw-compile
 	fi
-
-	rm ${FIT_DIR} -rf
-	mkdir -p ${FIT_DIR}
+	rm ${FIT_DIR} -rf && mkdir -p ${FIT_DIR}
 }
 
 function fit_gen_uboot_itb()
@@ -202,7 +192,7 @@ function fit_gen_uboot_itb()
 	./make.sh itb ${ARG_INI_TRUST} >/dev/null 2>&1
 	check_its ${ITS_UBOOT}
 
-	if [ "${ARG_NO_VBOOT}" == "y" ]; then
+	if [ "${ARG_SIGN}" != "y" ]; then
 		${MKIMAGE} -f ${ITS_UBOOT} -E -p ${OFFS_NS_UBOOT} ${ITB_UBOOT} -v ${ARG_VER_UBOOT}
 		if [ "${ARG_SPL_NEW}" == "y" ]; then
 			./make.sh --spl ${ARG_INI_LOADER}
@@ -224,6 +214,7 @@ function fit_gen_uboot_itb()
 			exit 1
 		fi
 
+		# rollback-index
 		if grep -q '^CONFIG_SPL_FIT_ROLLBACK_PROTECT=y' .config ; then
 			ARG_SPL_ROLLBACK_PROTECT="y"
 			if [ -z ${ARG_ROLLBACK_IDX_UBOOT} ]; then
@@ -233,14 +224,19 @@ function fit_gen_uboot_itb()
 		fi
 
 		if [ "${ARG_SPL_ROLLBACK_PROTECT}" == "y" ]; then
-			VERSION=`grep 'rollback-index' ${ITS_UBOOT} | awk -F '=' '{ printf $2 }' `
-			sed -i "s/${VERSION}/ <${ARG_ROLLBACK_IDX_UBOOT}>;/g" ${ITS_UBOOT}
+			VERSION=`grep 'rollback-index' ${ITS_UBOOT} | awk -F '=' '{ printf $2 }' | tr -d ' '`
+			sed -i "s/rollback-index = ${VERSION}/rollback-index = <${ARG_ROLLBACK_IDX_UBOOT}>;/g" ${ITS_UBOOT}
+		fi
+
+		# burn-key-hash
+		if [ "${ARG_BURN_KEY_HASH}" == "y" ]; then
+			sed -i "s/burn-key-hash = <0>;/burn-key-hash = <1>;/g" ${ITS_UBOOT}
 		fi
 
 		# u-boot.dtb must contains rsa key
 		if ! fdtget -l ${UBOOT_DTB} /signature >/dev/null 2>&1 ; then
 			${MKIMAGE} -f ${ITS_UBOOT} -k ${KEY_DIR} -K ${UBOOT_DTB} -E -p ${OFFS_S_UBOOT} -r ${ITB_UBOOT} -v ${ARG_VER_UBOOT}
-			echo "Adding RSA public key into ${UBOOT_DTB}"
+			echo "## Adding RSA public key into ${UBOOT_DTB}"
 		fi
 
 		# Pack
@@ -252,6 +248,14 @@ function fit_gen_uboot_itb()
 			VERSION=`fdtget -ti ${ITB_UBOOT} /configurations/conf rollback-index`
 			if [ "${VERSION}" != "${ARG_ROLLBACK_IDX_UBOOT}" ]; then
 				echo "ERROR: Failed to set rollback-index for ${ITB_UBOOT}";
+				exit 1
+			fi
+		fi
+
+		# burn-key-hash read back check
+		if [ "${ARG_BURN_KEY_HASH}" == "y" ]; then
+			if [ "`fdtget -ti ${ITB_UBOOT} /configurations/conf burn-key-hash`" != "1" ]; then
+				echo "ERROR: Failed to set burn-key-hash for ${ITB_UBOOT}";
 				exit 1
 			fi
 		fi
@@ -308,8 +312,8 @@ function fit_gen_uboot_itb()
 
 function fit_gen_boot_itb()
 {
-	if [ ! -z ${ARG_EXT_BOOT} ]; then
-		${FIT_UNPACK} -f ${ARG_EXT_BOOT} -o ${FIT_DIR}/unpack
+	if [ ! -z ${ARG_BOOT_IMG} ]; then
+		${FIT_UNPACK} -f ${ARG_BOOT_IMG} -o ${FIT_DIR}/unpack
 		ITS_BOOT="${FIT_DIR}/unpack/image.its"
 	else
 		compression=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${ARG_INI_TRUST} | tr -d ' ' | cut -c 13-`
@@ -320,7 +324,7 @@ function fit_gen_boot_itb()
 		check_its ${ITS_BOOT}
 	fi
 
-	if [ "${ARG_NO_VBOOT}" == "y" ]; then
+	if [ "${ARG_SIGN}" != "y" ]; then
 		${MKIMAGE} -f ${ITS_BOOT} -E -p ${OFFS_NS_BOOT} ${ITB_BOOT} -v ${ARG_VER_BOOT}
 	else
 		if [ ! -f ${RSA_PRI_KEY}  ]; then
@@ -357,8 +361,8 @@ function fit_gen_boot_itb()
 		fi
 
 		if [ "${ARG_ROLLBACK_PROTECT}" == "y" ]; then
-			VERSION=`grep 'rollback-index' ${ITS_BOOT} | awk -F '=' '{ printf $2 }' `
-			sed -i "s/${VERSION}/ <${ARG_ROLLBACK_IDX_BOOT}>;/g" ${ITS_BOOT}
+			VERSION=`grep 'rollback-index' ${ITS_BOOT} | awk -F '=' '{ printf $2 }' | tr -d ' '`
+			sed -i "s/rollback-index = ${VERSION}/rollback-index = <${ARG_ROLLBACK_IDX_BOOT}>;/g" ${ITS_BOOT}
 		fi
 
 		${MKIMAGE} -f ${ITS_BOOT} -k ${KEY_DIR} -K ${UBOOT_DTB} -E -p ${OFFS_S_BOOT} -r ${ITB_BOOT} -v ${ARG_VER_BOOT}
@@ -436,7 +440,7 @@ function fit_gen_boot_img()
 
 function fit_msg_uboot()
 {
-	if [ "${ARG_NO_VBOOT}" == "y" ]; then
+	if [ "${ARG_SIGN}" != "y" ]; then
 		MSG_SIGN="no-signed"
 	else
 		MSG_SIGN="signed"
@@ -445,6 +449,11 @@ function fit_msg_uboot()
 	VERSION=`fdtget -ti ${ITB_UBOOT} / version`
 	if [ "${VERSION}" != "" ]; then
 		MSG_VER=", version=${VERSION}"
+	fi
+
+	if [ "${ARG_BURN_KEY_HASH}" == "y" ]; then
+		echo "uboot.img: burn-key-hash=1"
+		echo
 	fi
 
 	if [ "${ARG_SPL_ROLLBACK_PROTECT}" == "y" ]; then
@@ -456,7 +465,7 @@ function fit_msg_uboot()
 
 function fit_msg_boot()
 {
-	if [ "${ARG_NO_VBOOT}" == "y" ]; then
+	if [ "${ARG_SIGN}" != "y" ]; then
 		MSG_SIGN="no-signed"
 	else
 		MSG_SIGN="signed"
@@ -480,18 +489,18 @@ function fit_msg_loader()
 	echo "Image(no-signed):  ${LOADER} (with spl, ddr, usbplug) is ready"
 }
 
-function fit_vboot_uboot()
+function fit_generate_uboot()
 {
-	fit_rebuild
+	fit_raw_compile
 	fit_gen_uboot_itb
 	fit_gen_uboot_img
 	echo
 	fit_msg_uboot
 }
 
-function fit_vboot()
+function fit_generate_uboot_boot()
 {
-	fit_rebuild
+	fit_raw_compile
 	fit_gen_boot_itb
 	fit_gen_boot_img
 	fit_gen_uboot_itb
@@ -507,11 +516,9 @@ function fit_vboot()
 fit_process_args $*
 if [ ! -z "${ARG_VALIDATE}" ]; then
 	validate_arg ${ARG_VALIDATE}
-elif [ "${ARG_PACK_UBOOT}${ARG_PACK_BOOT}" == "yy" ]; then
-	fit_vboot
-elif [ "${ARG_PACK_UBOOT}" == "y" ]; then
-	fit_vboot_uboot
-elif [ "${ARG_PACK_BOOT}" == "y" ]; then
-	fit_vboot_boot
+elif [ ! -z "${ARG_BOOT_IMG}" -o ! -z "${ARG_BOOT_IMG_DIR}" ]; then
+	fit_generate_uboot_boot
+else
+	fit_generate_uboot
 fi
 

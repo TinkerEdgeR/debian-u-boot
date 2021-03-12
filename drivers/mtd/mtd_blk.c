@@ -9,12 +9,16 @@
 #include <boot_rkimg.h>
 #include <dm.h>
 #include <errno.h>
+#include <image.h>
 #include <malloc.h>
 #include <nand.h>
 #include <part.h>
 #include <spi.h>
 #include <dm/device-internal.h>
 #include <linux/mtd/spi-nor.h>
+#ifdef CONFIG_NAND
+#include <linux/mtd/nand.h>
+#endif
 
 #define MTD_PART_NAND_HEAD		"mtdparts="
 #define MTD_ROOT_PART_NUM		"ubi.mtd="
@@ -38,14 +42,13 @@ int mtd_blk_map_table_init(struct blk_desc *desc,
 	if (!desc)
 		return -ENODEV;
 
-	if (desc->devnum == BLK_MTD_NAND) {
-#if defined(CONFIG_NAND)
-		mtd = dev_get_priv(desc->bdev->parent);
-#endif
-	} else if (desc->devnum == BLK_MTD_SPI_NAND) {
-#if defined(CONFIG_MTD_SPI_NAND)
+	switch (desc->devnum) {
+	case BLK_MTD_NAND:
+	case BLK_MTD_SPI_NAND:
 		mtd = desc->bdev->priv;
-#endif
+		break;
+	default:
+		break;
 	}
 
 	if (!mtd) {
@@ -54,6 +57,8 @@ int mtd_blk_map_table_init(struct blk_desc *desc,
 		blk_total = (mtd->size + mtd->erasesize - 1) >> mtd->erasesize_shift;
 		if (!mtd_map_blk_table) {
 			mtd_map_blk_table = (int *)malloc(blk_total * sizeof(int));
+			if (!mtd_map_blk_table)
+				return -ENOMEM;
 			for (i = 0; i < blk_total; i++)
 				mtd_map_blk_table[i] = MTD_BLK_TABLE_BLOCK_UNKNOWN;
 		}
@@ -133,6 +138,34 @@ void mtd_blk_map_partitions(struct blk_desc *desc)
 					   info.size << 9)) {
 			pr_debug("mtd block map table fail\n");
 		}
+	}
+}
+
+void mtd_blk_map_fit(struct blk_desc *desc, ulong sector, void *fit)
+{
+	struct mtd_info *mtd = NULL;
+	int totalsize = 0;
+
+	if (desc->if_type != IF_TYPE_MTD)
+		return;
+
+	if (desc->devnum == BLK_MTD_NAND) {
+#if defined(CONFIG_NAND)
+		mtd = dev_get_priv(desc->bdev->parent);
+#endif
+	} else if (desc->devnum == BLK_MTD_SPI_NAND) {
+#if defined(CONFIG_MTD_SPI_NAND)
+		mtd = desc->bdev->priv;
+#endif
+	}
+
+#ifdef CONFIG_SPL_FIT
+	if (fit_get_totalsize(fit, &totalsize))
+		debug("Can not find /totalsize node.\n");
+#endif
+	if (mtd && totalsize) {
+		if (mtd_blk_map_table_init(desc, sector << 9, totalsize + (size_t)mtd->erasesize))
+			debug("Map block table fail.\n");
 	}
 }
 
@@ -269,6 +302,48 @@ static __maybe_unused int mtd_map_write(struct mtd_info *mtd, loff_t offset,
 	return 0;
 }
 
+static __maybe_unused int mtd_map_erase(struct mtd_info *mtd, loff_t offset,
+					size_t length)
+{
+	struct erase_info ei;
+	loff_t pos, len;
+	int ret;
+
+	pos = offset;
+	len = length;
+
+	if ((pos & mtd->erasesize_mask) || (len & mtd->erasesize_mask)) {
+		pr_err("Attempt to erase non block-aligned data, pos= %llx, len= %llx\n",
+		       pos, len);
+
+		return -EINVAL;
+	}
+
+	while (len) {
+		if (mtd_block_isbad(mtd, pos) || mtd_block_isreserved(mtd, pos)) {
+			pr_debug("attempt to erase a bad/reserved block @%llx\n",
+				 pos);
+			pos += mtd->erasesize;
+			continue;
+		}
+
+		memset(&ei, 0, sizeof(struct erase_info));
+		ei.addr = pos;
+		ei.len  = mtd->erasesize;
+		ret = mtd_erase(mtd, &ei);
+		if (ret) {
+			pr_err("map_erase error %d while erasing %llx\n", ret,
+			       pos);
+			return ret;
+		}
+
+		pos += mtd->erasesize;
+		len -= mtd->erasesize;
+	}
+
+	return 0;
+}
+
 char *mtd_part_parse(void)
 {
 	char mtd_part_info_temp[MTD_SINGLE_PART_INFO_MAX_SIZE] = {0};
@@ -374,19 +449,9 @@ ulong mtd_dread(struct udevice *udev, lbaint_t start,
 	pr_debug("mtd dread %s %lx %lx\n", mtd->name, start, blkcnt);
 
 	if (desc->devnum == BLK_MTD_NAND) {
-#if defined(CONFIG_NAND) && !defined(CONFIG_SPL_BUILD)
-		mtd = dev_get_priv(udev->parent);
-		if (!mtd)
-			return 0;
-
-		ret = nand_read_skip_bad(mtd, off, &rwsize,
-					 NULL, mtd->size,
-					 (u_char *)(dst));
-#else
 		ret = mtd_map_read(mtd, off, &rwsize,
 				   NULL, mtd->size,
 				   (u_char *)(dst));
-#endif
 		if (!ret)
 			return blkcnt;
 		else
@@ -501,28 +566,68 @@ ulong mtd_dwrite(struct udevice *udev, lbaint_t start,
 ulong mtd_derase(struct udevice *udev, lbaint_t start,
 		 lbaint_t blkcnt)
 {
-	/* Not implemented */
+	struct blk_desc *desc = dev_get_uclass_platdata(udev);
+#if defined(CONFIG_NAND) || defined(CONFIG_MTD_SPI_NAND) || defined(CONFIG_SPI_FLASH_MTD)
+	loff_t off = (loff_t)(start * 512);
+	size_t len = blkcnt * 512;
+#endif
+	struct mtd_info *mtd;
+	int ret = 0;
+
+	if (!desc)
+		return ret;
+
+	mtd = desc->bdev->priv;
+	if (!mtd)
+		return 0;
+
+	pr_debug("mtd derase %s %lx %lx\n", mtd->name, start, blkcnt);
+
+	if (blkcnt == 0)
+		return 0;
+
+	if (desc->devnum == BLK_MTD_NAND ||
+	    desc->devnum == BLK_MTD_SPI_NAND) {
+		ret = mtd_map_erase(mtd, off, len);
+		if (ret)
+			return ret;
+	} else {
+		return 0;
+	}
+
 	return 0;
 }
 
 static int mtd_blk_probe(struct udevice *udev)
 {
-	struct mtd_info *mtd = dev_get_uclass_priv(udev->parent);
+	struct mtd_info *mtd;
 	struct blk_desc *desc = dev_get_uclass_platdata(udev);
-	int ret, i;
+	int ret, i = 0;
+
+	mtd = dev_get_uclass_priv(udev->parent);
+	if (mtd->type == MTD_NANDFLASH && desc->devnum == BLK_MTD_NAND) {
+#ifndef CONFIG_SPL_BUILD
+		mtd = dev_get_priv(udev->parent);
+#endif
+	}
 
 	desc->bdev->priv = mtd;
 	sprintf(desc->vendor, "0x%.4x", 0x2207);
 	memcpy(desc->product, mtd->name, strlen(mtd->name));
 	memcpy(desc->revision, "V1.00", sizeof("V1.00"));
 	if (mtd->type == MTD_NANDFLASH) {
+#ifdef CONFIG_NAND
 		if (desc->devnum == BLK_MTD_NAND)
-			mtd = dev_get_priv(udev->parent);
+			i = NAND_BBT_SCAN_MAXBLOCKS;
+		else if (desc->devnum == BLK_MTD_SPI_NAND)
+			i = NANDDEV_BBT_SCAN_MAXBLOCKS;
+#endif
+
 		/*
 		 * Find the first useful block in the end,
 		 * and it is the end lba of the nand storage.
 		 */
-		for (i = 0; i < (mtd->size / mtd->erasesize); i++) {
+		for (; i < (mtd->size / mtd->erasesize); i++) {
 			ret =  mtd_block_isbad(mtd,
 					       mtd->size - mtd->erasesize * (i + 1));
 			if (!ret) {

@@ -9,9 +9,10 @@
 #include <boot_rkimg.h>
 #include <errno.h>
 #include <image.h>
-#include <linux/libfdt.h>
 #include <spl.h>
 #include <malloc.h>
+#include <mtd_blk.h>
+#include <linux/libfdt.h>
 
 #ifndef CONFIG_SYS_BOOTM_LEN
 #define CONFIG_SYS_BOOTM_LEN	(64 << 20)
@@ -324,6 +325,21 @@ static int spl_fit_append_fdt(struct spl_image_info *spl_image,
 	ret = fdt_shrink_to_minimum(spl_image->fdt_addr, 8192);
 #endif
 
+	/*
+	 * If need, load kernel FDT right after U-Boot FDT.
+	 *
+	 * kernel FDT is for U-Boot if there is not valid one
+	 * from images, ie: resource.img, boot.img or recovery.img.
+	 */
+	node = fdt_subnode_offset(fit, images, FIT_KERNEL_FDT_PROP);
+	if (node < 0)
+		return ret;
+
+	image_info.load_addr =
+		(ulong)spl_image->fdt_addr + fdt_totalsize(spl_image->fdt_addr);
+	ret = spl_load_fit_image(info, sector, fit, base_offset, node,
+				 &image_info);
+
 	return ret;
 }
 
@@ -404,6 +420,9 @@ static void *spl_fit_load_blob(struct spl_load_info *info,
 			align_len) & ~align_len);
 	sectors = get_aligned_image_size(info, size, 0);
 	count = info->read(info, sector, sectors, fit);
+#ifdef CONFIG_MTD_BLK
+	mtd_blk_map_fit(info->dev, sector, fit);
+#endif
 	debug("fit read sector %lx, sectors=%d, dst=%p, count=%lu\n",
 	      sector, sectors, fit, count);
 	if (count == 0)
@@ -706,6 +725,11 @@ static int spl_internal_load_simple_fit(struct spl_image_info *spl_image,
 			continue;
 
 		if (os_type == IH_OS_U_BOOT) {
+#if CONFIG_IS_ENABLED(ATF)
+			spl_image->entry_point_bl33 = image_info.load_addr;
+#elif CONFIG_IS_ENABLED(OPTEE)
+			spl_image->entry_point_os = image_info.load_addr;
+#endif
 			spl_fit_append_fdt(&image_info, info, sector,
 					   fit, images, base_offset);
 			spl_image->fdt_addr = image_info.fdt_addr;

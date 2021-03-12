@@ -209,8 +209,8 @@ function process_args()
 				ARG_UBOOT_SIZE="--size $2 $3"
 				shift 3
 				;;
-			--no-pack)  # FIT: build but not pack image
-				ARG_NO_PACK="y"
+			--raw-compile)  # FIT: build but not pack image
+				ARG_RAW_COMPILE="y"
 				shift 1
 				;;
 			--no-uboot) # FIT: pack uboot.img without u-boot
@@ -230,7 +230,7 @@ function process_args()
 				;;
 			*)
 				#1. FIT scripts args
-				NUM=$(${SCRIPT_FIT} --arg-check $1)
+				NUM=$(${SCRIPT_FIT} --args $1)
 				if  [ ${NUM} -ne 0 ]; then
 					[ ${NUM} -eq 1 ] && ARG_LIST_FIT="${ARG_LIST_FIT} $1"
 					[ ${NUM} -eq 2 ] && ARG_LIST_FIT="${ARG_LIST_FIT} $1 $2"
@@ -456,6 +456,7 @@ function sub_commands()
 	case ${CMD} in
 		elf|nm)
 			if [ "${CMD}" == "nm" ]; then
+				echo -e "\n${ELF}:     file format elf\n"
 				${TOOLCHAIN_NM} -r --size ${ELF} | less
 			else
 				if [ "${CMD}" == "elf" -a "${ARG}" == "elf" ]; then
@@ -479,7 +480,7 @@ function sub_commands()
 			;;
 		fit)
 			# Non-secure
-			${SCRIPT_FIT} --uboot-itb --boot-itb --no-vboot ${ARG_LIST_FIT}
+			${SCRIPT_FIT} --boot_img_dir images/ ${ARG_LIST_FIT}
 			exit 0
 			;;
 		uboot)
@@ -593,9 +594,14 @@ function pack_uboot_itb_image()
 
 	if [ "${ARM64_TRUSTZONE}" == "y" ]; then
 		BL31_ELF=`sed -n '/_bl31_/s/PATH=//p' ${INI} | tr -d '\r'`
+		BL32_BIN=`sed -n '/_bl32_/s/PATH=//p' ${INI} | tr -d '\r'`
+		rm bl31.elf tee.bin -rf
 		cp ${RKBIN}/${BL31_ELF} bl31.elf
-		make CROSS_COMPILE=${TOOLCHAIN_GCC} u-boot.itb
-		echo "pack u-boot.itb okay! Input: ${INI}"
+		if grep BL32_OPTION -A 1 ${INI} | grep SEC=1 ; then
+			cp ${RKBIN}/${BL32_BIN} tee.bin
+			TEE_OFFSET=`grep BL32_OPTION -A 3 ${INI} | grep ADDR= | awk -F "=" '{ printf $2 }' | tr -d '\r'`
+			TEE_ARG="-t ${TEE_OFFSET}"
+		fi
 	else
 		# TOS
 		TOS=`sed -n "/TOS=/s/TOS=//p" ${INI} | tr -d '\r'`
@@ -613,6 +619,7 @@ function pack_uboot_itb_image()
 		if [ "${TEE_OFFSET}" == "" ]; then
 			TEE_OFFSET=0x8400000
 		fi
+		TEE_ARG="-t ${TEE_OFFSET}"
 
 		# MCU
 		MCU_ENABLED=`awk -F"," '/MCU=/ { printf $3 }' ${INI} | tr -d ' '`
@@ -620,29 +627,29 @@ function pack_uboot_itb_image()
 			MCU=`awk -F"," '/MCU=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 5-`
 			cp ${RKBIN}/${MCU} mcu.bin
 			MCU_OFFSET=`awk -F"," '/MCU=/ { printf $2 }' ${INI} | tr -d ' '`
+			MCU_ARG="-m ${MCU_OFFSET}"
 		fi
-
-		COMPRESSION=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 13-`
-		if [ -z "${COMPRESSION}" ]; then
-			COMPRESSION="none"
-		fi
-
-		# its
-		SPL_FIT_SOURCE=`sed -n "/CONFIG_SPL_FIT_SOURCE=/s/CONFIG_SPL_FIT_SOURCE=//p" .config | tr -d '""'`
-		if [ ! -z ${SPL_FIT_SOURCE} ]; then
-			cp ${SPL_FIT_SOURCE} u-boot.its
-		else
-			SPL_FIT_GENERATOR=`sed -n "/CONFIG_SPL_FIT_GENERATOR=/s/CONFIG_SPL_FIT_GENERATOR=//p" .config | tr -d '""'`
-			if [ ! -z ${MCU_OFFSET} ]; then
-				${SPL_FIT_GENERATOR} -u -t ${TEE_OFFSET} -c ${COMPRESSION} -m ${MCU_OFFSET} > u-boot.its
-			else
-				${SPL_FIT_GENERATOR} -u -t ${TEE_OFFSET} -c ${COMPRESSION} > u-boot.its
-			fi
-		fi
-
-		./tools/mkimage -f u-boot.its -E u-boot.itb
-		echo "pack u-boot.itb okay! Input: ${INI}"
 	fi
+
+	COMPRESSION=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 13-`
+	if [ ! -z "${COMPRESSION}" -a "${COMPRESSION}" != "none" ]; then
+		COMPRESSION_ARG="-c ${COMPRESSION}"
+	fi
+
+	SPL_FIT_SOURCE=`sed -n "/CONFIG_SPL_FIT_SOURCE=/s/CONFIG_SPL_FIT_SOURCE=//p" .config | tr -d '""'`
+	if [ ! -z ${SPL_FIT_SOURCE} ]; then
+		cp ${SPL_FIT_SOURCE} u-boot.its
+	else
+		SPL_FIT_GENERATOR=`sed -n "/CONFIG_SPL_FIT_GENERATOR=/s/CONFIG_SPL_FIT_GENERATOR=//p" .config | tr -d '""'`
+		if [[ ${SPL_FIT_GENERATOR} == *.py ]]; then
+			${SPL_FIT_GENERATOR} u-boot.dtb > u-boot.its
+		else
+			${SPL_FIT_GENERATOR} ${TEE_ARG} ${COMPRESSION_ARG} ${MCU_ARG} > u-boot.its
+		fi
+	fi
+
+	./tools/mkimage -f u-boot.its -E u-boot.itb
+	echo "pack u-boot.itb okay! Input: ${INI}"
 	echo
 }
 
@@ -716,15 +723,18 @@ function pack_fit_image()
 		touch u-boot-nodtb.bin u-boot.dtb
 	fi
 
-	# Verified boot=1:  must build both uboot.img and boot.img
-	# Verified boot=0:  build uboot.img
-	if grep -q '^CONFIG_FIT_SIGNATURE=y' .config ; then
-		${SCRIPT_FIT} --uboot-itb --boot-itb ${ARG_LIST_FIT}
-	else
-		rm uboot.img trust*.img -f
-		${SCRIPT_FIT} --uboot-itb --no-vboot --no-rebuild ${ARG_LIST_FIT}
-		echo "pack uboot.img okay! Input: ${INI_TRUST}"
+	rm uboot.img trust*.img -rf
+	${SCRIPT_FIT} ${ARG_LIST_FIT}
+
+	if [ "${ARM64_TRUSTZONE}" == "y" ]; then
+		if ! fdtget -l uboot.img /images/atf-1 >/dev/null 2>&1 ; then
+			echo -e "\nERROR: Invalid uboot.img, please install: \"pip install pyelftools\""
+			echo
+			exit 1
+		fi
 	fi
+
+	echo "pack uboot.img okay! Input: ${INI_TRUST}"
 }
 
 function handle_args_late()
@@ -740,16 +750,14 @@ function clean_files()
 
 function pack_images()
 {
-	if [ "${ARG_NO_PACK}" == "y" ]; then
-		return
-	fi
-
-	if [ "${PLAT_TYPE}" == "RKFW" ]; then
-		pack_uboot_image
-		pack_trust_image
-		pack_loader_image
-	elif [ "${PLAT_TYPE}" == "FIT" ]; then
-		pack_fit_image ${ARG_LIST_FIT}
+	if [ "${ARG_RAW_COMPILE}" != "y" ]; then
+		if [ "${PLAT_TYPE}" == "FIT" ]; then
+			pack_fit_image ${ARG_LIST_FIT}
+		else
+			pack_uboot_image
+			pack_trust_image
+			pack_loader_image
+		fi
 	fi
 }
 
@@ -772,6 +780,6 @@ select_ini_file
 handle_args_late
 sub_commands
 clean_files
-make CROSS_COMPILE=${TOOLCHAIN_GCC} all --jobs=${JOB}
+make PYTHON=python2 CROSS_COMPILE=${TOOLCHAIN_GCC} all --jobs=${JOB}
 pack_images
 finish

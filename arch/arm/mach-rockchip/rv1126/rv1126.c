@@ -5,6 +5,7 @@
  */
 #include <common.h>
 #include <asm/io.h>
+#include <asm/arch/boot_mode.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/grf_rv1126.h>
 
@@ -91,8 +92,15 @@ DECLARE_GLOBAL_DATA_PTR;
 #define SGRF_SOC_CON3		0x00c
 #define CRU_SOFTRST_CON11	0xFF49032C
 #define PMUGRF_SOC_CON1		0xFE020104
+#define PMUGRF_RSTFUNC_STATUS	0xFE020230
+#define PMUGRF_RSTFUNC_CLR	0xFE020234
+#define WDT_RESET_SRC		BIT(1)
+#define WDT_RESET_SRC_CLR	BIT(1)
 #define GRF_IOFUNC_CON3		0xFF01026C
 #define GRF1_GPIO0D_P		0xFE010104
+#define OTP_NS_BASE		0xFF5C0000
+#define OTP_S_BASE		0xFF5D0000
+#define OTP_NVM_TRWH		0x28
 
 enum {
 	GPIO1A7_SHIFT		= 12,
@@ -369,6 +377,7 @@ void board_debug_uart_init(void)
 
 #elif defined(CONFIG_DEBUG_UART_BASE) && (CONFIG_DEBUG_UART_BASE == 0xff410000)
 	static struct rv1126_pmugrf * const pmugrf = (void *)PMUGRF_BASE;
+	static struct rv1126_grf * const grf = (void *)GRF_BASE;
 #if defined(CONFIG_ROCKCHIP_UART_MUX_SEL_M) && \
     (CONFIG_ROCKCHIP_UART_MUX_SEL_M == 0)
 	/* UART1 M0 */
@@ -386,7 +395,7 @@ void board_debug_uart_init(void)
 		     UART1_IO_SEL_M1 << UART1_IO_SEL_SHIFT);
 
 	/* Switch iomux */
-	rk_clrsetreg(&topgrf->gpio1d_iomux_l,
+	rk_clrsetreg(&grf->gpio1d_iomux_l,
 		     GPIO1D1_MASK | GPIO1D0_MASK,
 		     GPIO1D1_UART1_RX_M1 << GPIO1D1_SHIFT |
 		     GPIO1D0_UART1_TX_M1 << GPIO1D0_SHIFT);
@@ -527,13 +536,33 @@ void board_debug_uart_init(void)
 #endif /* CONFIG_DEBUG_UART_BASE && CONFIG_DEBUG_UART_BASE == ... */
 }
 
+#ifndef CONFIG_TPL_BUILD
 int arch_cpu_init(void)
 {
-#ifdef CONFIG_SPL_BUILD
+	/*
+	 * CONFIG_DM_RAMDISK: for ramboot that without SPL.
+	 */
+#if defined(CONFIG_SPL_BUILD) || defined(CONFIG_DM_RAMDISK)
 	int delay;
 
-	/* Just set region 0 to unsecure */
+	/* write BOOT_WATCHDOG to boot mode register, if reset by wdt */
+	if (readl(PMUGRF_RSTFUNC_STATUS) & WDT_RESET_SRC) {
+		writel(BOOT_WATCHDOG, CONFIG_ROCKCHIP_BOOT_MODE_REG);
+		/* clear flag for reset by wdt trigger */
+		writel(WDT_RESET_SRC_CLR, PMUGRF_RSTFUNC_CLR);
+	}
+
+#ifdef CONFIG_SPL_BUILD
+	/* set otp tRWH to 0x9 for stable read */
+	writel(0x9, OTP_NS_BASE + OTP_NVM_TRWH);
+	writel(0x9, OTP_S_BASE + OTP_NVM_TRWH);
+
+	/*
+	 * Just set region 0 to unsecure.
+	 * (Note: only secure-world can access this register)
+	 */
 	writel(0, FIREWALL_APB_BASE + FW_DDR_CON_REG);
+#endif
 
 	/* disable force jtag mux route to both group0 and group1 */
 	writel(0x00300000, GRF_IOFUNC_CON3);
@@ -655,13 +684,14 @@ int arch_cpu_init(void)
 	/* hold pmugrf's io reset */
 	writel(0x1 << 7 | 1 << 23, PMUGRF_SOC_CON1);
 #endif
+
 #if defined(CONFIG_ROCKCHIP_SFC) && (defined(CONFIG_SPL_BUILD) || defined(CONFIG_SUPPORT_USBPLUG))
 	/* GPIO0_D6 pull down in default, pull up it for SPI Flash */
 	writel(((0x3 << 12) << 16) | (0x1 << 12), GRF1_GPIO0D_P);
 #endif
-
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_SPL_BUILD
 int spl_fit_standalone_release(uintptr_t entry_point)
@@ -672,6 +702,7 @@ int spl_fit_standalone_release(uintptr_t entry_point)
 	/* set the scr1 addr */
 	writel(entry_point, SGRF_BASE + SGRF_CON_SCR1_BOOT_ADDR);
 	writel(0x00ff00bf, SGRF_BASE + SGRF_SOC_CON3);
+	udelay(10);
 	/* release the scr1 */
 	writel(0x04000000, CRU_BASE + CRU_SOFTRST_CON02);
 

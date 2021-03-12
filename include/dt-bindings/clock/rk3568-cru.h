@@ -59,8 +59,10 @@
 #define PCLK_GPIO0		46
 #define PCLK_PMUPVTM		47
 #define PCLK_PWM0		48
+#define CLK_PDPMU		49
+#define SCLK_32K_IOE		50
 
-#define CLKPMU_NR_CLKS		(PCLK_PWM0 + 1)
+#define CLKPMU_NR_CLKS		(SCLK_32K_IOE + 1)
 
 /* cru-clocks indices */
 
@@ -73,6 +75,7 @@
 #define PLL_NPLL		6
 
 /* cru clocks */
+#define CPLL_333M		9
 #define ARMCLK			10
 #define USB480M			11
 #define ACLK_CORE_NIU2BUS	18
@@ -97,8 +100,8 @@
 #define HCLK_NPU_PRE		37
 #define PCLK_NPU_PRE		38
 #define ACLK_NPU_PRE		39
-#define ACLK_RKNN		40
-#define HCLK_RKNN		41
+#define ACLK_NPU		40
+#define HCLK_NPU		41
 #define PCLK_NPU_PVTM		42
 #define CLK_NPU_PVTM		43
 #define CLK_NPU_PVTM_CORE	44
@@ -157,7 +160,7 @@
 #define SCLK_AUDPWM_SRC		97
 #define SCLK_AUDPWM_FRAC	98
 #define SCLK_AUDPWM		99
-#define HCLK_ACDCDIG_I2C	100
+#define HCLK_ACDCDIG		100
 #define CLK_ACDCDIG_I2C		101
 #define CLK_ACDCDIG_DAC		102
 #define CLK_ACDCDIG_ADC		103
@@ -289,7 +292,6 @@
 #define PCLK_HDCP		229
 #define PCLK_HDMI_HOST		230
 #define CLK_HDMI_SFR		231
-#define CLK_HDMI_CEC		231
 #define PCLK_DSITX_0		232
 #define PCLK_DSITX_1		233
 #define PCLK_EDP_CTRL		234
@@ -460,8 +462,18 @@
 #define SCLK_SDMMC2_SAMPLE	399
 #define SCLK_EMMC_DRV		400
 #define SCLK_EMMC_SAMPLE	401
+#define PCLK_EDPPHY_GRF		402
+#define CLK_HDMI_CEC            403
+#define CLK_I2S0_8CH_TX		404
+#define CLK_I2S0_8CH_RX		405
+#define CLK_I2S1_8CH_TX		406
+#define CLK_I2S1_8CH_RX		407
+#define CLK_I2S2_2CH		408
+#define CLK_I2S3_2CH_TX		409
+#define CLK_I2S3_2CH_RX		410
+#define PCLK_CORE_PVTM		450
 
-#define CLK_NR_CLKS		(SCLK_EMMC_SAMPLE + 1)
+#define CLK_NR_CLKS		(PCLK_CORE_PVTM + 1)
 
 /* pmu soft-reset indices */
 /* pmucru_softrst_con0 */
@@ -521,8 +533,8 @@
 #define SRST_A_NPU_NIU		40
 #define SRST_H_NPU_NIU		41
 #define SRST_P_NPU_NIU		42
-#define SRST_A_RKNN		43
-#define SRST_H_RKNN		44
+#define SRST_A_NPU		43
+#define SRST_H_NPU		44
 #define SRST_P_NPU_PVTM		45
 #define SRST_NPU_PVTM		46
 #define SRST_NPU_PVTPLL		47
@@ -620,12 +632,42 @@
 
 /* cru_softrst_con10 */
 #define SRST_P_PCIE20		160
+#define SRST_PCIE20_POWERUP	161
+#define SRST_MSTR_ARESET_PCIE20	162
+#define SRST_SLV_ARESET_PCIE20	163
+#define SRST_DBI_ARESET_PCIE20	164
+#define SRST_BRESET_PCIE20	165
+#define SRST_PERST_PCIE20	166
+#define SRST_CORE_RST_PCIE20	167
+#define SRST_NSTICKY_RST_PCIE20	168
+#define SRST_STICKY_RST_PCIE20	169
+#define SRST_PWR_RST_PCIE20	170
 
 /* cru_softrst_con11 */
 #define SRST_P_PCIE30X1		176
+#define SRST_PCIE30X1_POWERUP	177
+#define SRST_M_ARESET_PCIE30X1	178
+#define SRST_S_ARESET_PCIE30X1	179
+#define SRST_D_ARESET_PCIE30X1	180
+#define SRST_BRESET_PCIE30X1	181
+#define SRST_PERST_PCIE30X1	182
+#define SRST_CORE_RST_PCIE30X1	183
+#define SRST_NSTC_RST_PCIE30X1	184
+#define SRST_STC_RST_PCIE30X1	185
+#define SRST_PWR_RST_PCIE30X1	186
 
 /* cru_softrst_con12 */
 #define SRST_P_PCIE30X2		192
+#define SRST_PCIE30X2_POWERUP	193
+#define SRST_M_ARESET_PCIE30X2	194
+#define SRST_S_ARESET_PCIE30X2	195
+#define SRST_D_ARESET_PCIE30X2	196
+#define SRST_BRESET_PCIE30X2	197
+#define SRST_PERST_PCIE30X2	198
+#define SRST_CORE_RST_PCIE30X2	199
+#define SRST_NSTC_RST_PCIE30X2	200
+#define SRST_STC_RST_PCIE30X2	201
+#define SRST_PWR_RST_PCIE30X2	202
 
 /* cru_softrst_con13 */
 #define SRST_A_PHP_NIU		208

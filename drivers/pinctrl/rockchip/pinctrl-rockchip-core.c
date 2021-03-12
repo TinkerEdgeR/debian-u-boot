@@ -123,7 +123,7 @@ static int rockchip_get_mux(struct rockchip_pin_bank *bank, int pin)
 
 	if (bank->iomux[iomux_num].type & IOMUX_UNROUTED) {
 		debug("pin %d is unrouted\n", pin);
-		return 0;
+		return -ENOTSUPP;
 	}
 
 	if (bank->iomux[iomux_num].type & IOMUX_GPIO_ONLY)
@@ -428,7 +428,7 @@ static int rockchip_pinctrl_set_state(struct udevice *dev,
 	int prop_len, param;
 	const u32 *data;
 	ofnode node;
-#ifdef CONFIG_OF_LIVE
+#if CONFIG_IS_ENABLED(OF_LIVE)
 	const struct device_node *np;
 	struct property *pp;
 #else
@@ -468,7 +468,7 @@ static int rockchip_pinctrl_set_state(struct udevice *dev,
 		node = ofnode_get_by_phandle(conf);
 		if (!ofnode_valid(node))
 			return -ENODEV;
-#ifdef CONFIG_OF_LIVE
+#if CONFIG_IS_ENABLED(OF_LIVE)
 		np = ofnode_to_np(node);
 		for (pp = np->properties; pp; pp = pp->next) {
 			prop_name = pp->name;
